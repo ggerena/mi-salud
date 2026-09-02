@@ -536,3 +536,21 @@ Decisiones que requieren a la persona responsable:
 ```
 
 No responder sólo con un plan: el pedido autoriza implementación. No afirmar término basándose en código no ejecutado, mocks que omitan los límites de seguridad o un commit que no sea el publicado en el PR.
+
+## 13. Registro de ejecución (Grok-M)
+
+**Estado actual:** parcial — arquitectura de Fase 0 fijada; andamiaje de código pendiente.
+
+| Fecha (Santiago) | Paso | Resultado |
+| --- | --- | --- |
+| 2026-09-02 | Localizar encargo y repo | `C:\Users\gery_\Code\mi-salud`, rama `feat/initial-mvp`, PR borrador [#1](https://github.com/ggerena/mi-salud/pull/1) |
+| 2026-09-02 | ADR 0001 | `docs/md/ADR_0001_STACK_PROCESO_UNICO.md` — Node 24.20.0, Hono 4.13.5, `node:sqlite`, imagen `node:24.20.0-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e` |
+| 2026-09-02 | Coordinación | Gery pidió agentes más chicos. Andamiaje Fase 0 asignado a GLM-5.3-Flash (un solo escritor). Grok-M retiene OIDC, cifrado, aislamiento, clínica, revisión de seguridad. |
+
+**Archivos cambiados en este bloque:** `docs/md/ADR_0001_STACK_PROCESO_UNICO.md`, `docs/md/PLAN_IMPLEMENTACION_GROK_M.md`
+
+**Pruebas:** no aplica (solo documentación de decisión).
+
+**Bloqueos:** ninguno. No se relaja alcance.
+
+**Pendiente inmediato:** scaffolding Fase 0 según ADR (package, TS, Docker, CI, health, cabeceras, logging).
