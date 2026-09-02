@@ -21,7 +21,10 @@ export function createApp(deps: AppDeps): Hono {
       onError: () =>
         new Response(
           JSON.stringify({
-            error: { code: 'payload_too_large', message: 'Cuerpo de la solicitud demasiado grande.' },
+            error: {
+              code: 'payload_too_large',
+              message: 'Cuerpo de la solicitud demasiado grande.',
+            },
           }),
           {
             status: 413,

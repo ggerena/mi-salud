@@ -539,7 +539,7 @@ No responder sólo con un plan: el pedido autoriza implementación. No afirmar t
 
 ## 13. Registro de ejecución (Grok-M)
 
-**Estado actual:** parcial — Fase 0 (base y barreras) implementada por GLM-5.3-Flash; pendiente revisión de Grok-M.
+**Estado actual:** parcial — Fase 0 usable tras correcciones de revisión; CI del commit de GLM estaba en rojo y se corrigió. MVP completo sigue pendiente.
 
 | Fecha (Santiago) | Paso | Resultado |
 | --- | --- | --- |
@@ -547,6 +547,7 @@ No responder sólo con un plan: el pedido autoriza implementación. No afirmar t
 | 2026-09-02 | ADR 0001 | `docs/md/ADR_0001_STACK_PROCESO_UNICO.md` — Node 24.20.0, Hono 4.13.5, `node:sqlite`, imagen `node:24.20.0-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e` |
 | 2026-09-02 | Coordinación | Gery pidió agentes más chicos. Andamiaje Fase 0 asignado a GLM-5.3-Flash (un solo escritor). Grok-M retiene OIDC, cifrado, aislamiento, clínica, revisión de seguridad. |
 | 2026-09-02 | Fase 0 — andamiaje (GLM-5.3-Flash) | Ver sección "Registro Fase 0 (GLM-5.3-Flash)" abajo. |
+| 2026-09-02 | Revisión Grok-M de `362da4e` | CI rojo: lint Biome y Gitleaks `generic-api-key` en fixture sintético. `.gitignore` `objects/` ocultaba `src/infrastructure/objects/`. Compose podía heredar `HOST=127.0.0.1` del `.env` y dejar el contenedor inalcanzable. |
 
 ## Registro Fase 0 (GLM-5.3-Flash)
 
@@ -567,3 +568,18 @@ No responder sólo con un plan: el pedido autoriza implementación. No afirmar t
 **Bloqueos:** ninguno.
 
 **Pendiente inmediato:** revisión del diff por Grok-M; imagen OCI en entorno con Docker.
+
+## Registro revisión Fase 0 (Grok-M)
+
+**Hallazgos corregidos (alta/media):**
+
+- Lint CI: formato, `useLiteralKeys` y orden de exports; `biome.json` migrado a `rules.preset`.
+- Gitleaks: allowlist de `tests/fixtures/` (clave sintética, no secreta).
+- `.gitignore`: `/objects/` y datos personales solo en la raíz; se versiona `src/infrastructure/objects/index.ts`.
+- `compose.yaml` fuerza `HOST=0.0.0.0` dentro del contenedor (el host sigue en `127.0.0.1:8080`).
+- Imagen: copia `LICENSE` (AGPL).
+- `scripts/checks.mjs`: sin `require` ESM; `npm`/`npx` en Windows.
+
+**Pruebas de esta revisión (HEAD local, luego el commit de corrección):** lint OK; typecheck OK; unit+integration 15/15; smoke 2/2; `npm audit --omit=dev --audit-level=high` 0; imagen `mi-salud:local` construida; `docker compose up` efímero: `/health` y `/ready` en `127.0.0.1:8080`, uid 1000, incluso con `HOST=127.0.0.1` en `.env`.
+
+**Pendientes / NO PROBADO:** Gitleaks de CI sobre el commit nuevo; volumenes nombrados siguen root (sin escritura en Fase 0); logs no redactan strings sueltos sin nombre de campo sensible; OIDC/bóvedas/clínica/FHIR/MCP no implementados.

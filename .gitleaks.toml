@@ -1,0 +1,5 @@
+title = "MiSalud"
+
+[allowlist]
+description = "Fixtures sinteticos; no son secretos ni datos reales"
+paths = ['''^tests/fixtures/''']

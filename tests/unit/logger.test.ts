@@ -6,10 +6,13 @@ describe('redactValue', () => {
     const out = redactValue({
       user: 'persona-ejemplo',
       meta: { api_key: 'abc', Authorization: 'Bearer xyz', host: '127.0.0.1' },
-    }) as { user: unknown; meta: Record<string, unknown> };
-    expect(out.meta['api_key']).toBe('[REDACTED]');
-    expect(out.meta['Authorization']).toBe('[REDACTED]');
-    expect(out.meta['host']).toBe('127.0.0.1');
+    }) as {
+      user: unknown;
+      meta: { api_key: unknown; Authorization: unknown; host: unknown };
+    };
+    expect(out.meta.api_key).toBe('[REDACTED]');
+    expect(out.meta.Authorization).toBe('[REDACTED]');
+    expect(out.meta.host).toBe('127.0.0.1');
   });
 
   it('redacta buffers y profundidades excesivas', () => {
@@ -33,6 +36,6 @@ describe('redactValue', () => {
     const line = lines[0] ?? '';
     expect(line).not.toContain('a'.repeat(32));
     expect(line).not.toContain('s3cr3t-valor');
-    expect(JSON.parse(line)['level']).toBe('info');
+    expect((JSON.parse(line) as { level: string }).level).toBe('info');
   });
 });

@@ -16,6 +16,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
 COPY --from=build /build/dist ./dist
+COPY LICENSE ./
 USER node
 EXPOSE 8080
 CMD ["node", "dist/app/main.js"]

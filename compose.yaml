@@ -16,6 +16,9 @@ services:
       - misalud_objects:/objects
     environment:
       NODE_ENV: production
+      # Dentro del contenedor debe escuchar en todas las interfaces;
+      # el recorte a localhost lo hace el puerto publicado abajo.
+      HOST: 0.0.0.0
       MISALUD_DATA_DIR: /data
       MISALUD_OBJECTS_DIR: /objects
     read_only: true

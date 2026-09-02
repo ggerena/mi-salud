@@ -8,14 +8,14 @@
 *.pfx
 secrets/
 
-# Personal and clinical data
-data/
-objects/
-uploads/
-imports/
-exports/
-backups/
-logs/
+# Personal and clinical data (solo en la raiz; no ocultar src/**)
+/data/
+/objects/
+/uploads/
+/imports/
+/exports/
+/backups/
+/logs/
 *.db
 *.db-*
 *.sqlite
