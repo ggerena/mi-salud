@@ -9,6 +9,7 @@ import type {
   PatientProfile,
   Provider,
 } from '../../domain/clinical.ts';
+import type { FollowUpPlan, FollowUpRule } from '../../domain/followup.ts';
 import type { FieldCipher } from '../crypto/fields.ts';
 
 const PROFILE_SCOPE = 'patient_profile';
@@ -18,6 +19,8 @@ const DOCUMENT_SCOPE = 'clinical_documents';
 const REPORT_SCOPE = 'diagnostic_reports';
 const OBSERVATION_SCOPE = 'observations';
 const VERSION_SCOPE = 'observation_versions';
+const PLAN_SCOPE = 'follow_up_plans';
+const RULE_SCOPE = 'follow_up_rules';
 
 export function findProfile(db: DatabaseSync, cipher: FieldCipher): PatientProfile | null {
   const row = db
@@ -654,4 +657,188 @@ export function listAuditEntries(db: DatabaseSync, limit: number): AuditEntry[] 
     occurredAt: row.occurred_at,
     detail: row.detail,
   }));
+}
+
+const PLAN_COLUMNS =
+  'id, test_code, test_name, basis, basis_text, interval_iso, due_date_exact, anchor_at, upcoming_days, overdue_days, status, document_id, observation_id, provider_id, source_ref, rule_id, created_at, updated_at';
+
+interface PlanRow {
+  id: string;
+  test_code: string | null;
+  test_name: string | null;
+  basis: string;
+  basis_text: string | null;
+  interval_iso: string | null;
+  due_date_exact: string | null;
+  anchor_at: string | null;
+  upcoming_days: number;
+  overdue_days: number;
+  status: string;
+  document_id: string | null;
+  observation_id: string | null;
+  provider_id: string | null;
+  source_ref: string | null;
+  rule_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+function rowToPlan(row: PlanRow, cipher: FieldCipher): FollowUpPlan {
+  const id = row.id;
+  return {
+    id,
+    testCode: cipher.dec(PLAN_SCOPE, id, 'test_code', row.test_code),
+    testName: cipher.dec(PLAN_SCOPE, id, 'test_name', row.test_name) ?? '',
+    basis: row.basis as FollowUpPlan['basis'],
+    basisText: cipher.dec(PLAN_SCOPE, id, 'basis_text', row.basis_text) ?? '',
+    intervalIso: cipher.dec(PLAN_SCOPE, id, 'interval_iso', row.interval_iso),
+    dueDateExact: cipher.dec(PLAN_SCOPE, id, 'due_date_exact', row.due_date_exact),
+    anchorAt: cipher.dec(PLAN_SCOPE, id, 'anchor_at', row.anchor_at) ?? '',
+    upcomingDays: row.upcoming_days,
+    overdueDays: row.overdue_days,
+    status: row.status as FollowUpPlan['status'],
+    documentId: row.document_id,
+    observationId: row.observation_id,
+    providerId: row.provider_id,
+    sourceRef: cipher.dec(PLAN_SCOPE, id, 'source_ref', row.source_ref),
+    ruleId: row.rule_id,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export function insertFollowUpPlan(
+  db: DatabaseSync,
+  cipher: FieldCipher,
+  plan: FollowUpPlan,
+): void {
+  const id = plan.id;
+  db.prepare(
+    `INSERT INTO follow_up_plans (
+      id, test_code, test_name, basis, basis_text, interval_iso, due_date_exact, anchor_at,
+      upcoming_days, overdue_days, status, document_id, observation_id, provider_id, source_ref,
+      rule_id, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    id,
+    cipher.enc(PLAN_SCOPE, id, 'test_code', plan.testCode),
+    cipher.enc(PLAN_SCOPE, id, 'test_name', plan.testName),
+    plan.basis,
+    cipher.enc(PLAN_SCOPE, id, 'basis_text', plan.basisText),
+    cipher.enc(PLAN_SCOPE, id, 'interval_iso', plan.intervalIso),
+    cipher.enc(PLAN_SCOPE, id, 'due_date_exact', plan.dueDateExact),
+    cipher.enc(PLAN_SCOPE, id, 'anchor_at', plan.anchorAt),
+    plan.upcomingDays,
+    plan.overdueDays,
+    plan.status,
+    plan.documentId,
+    plan.observationId,
+    plan.providerId,
+    cipher.enc(PLAN_SCOPE, id, 'source_ref', plan.sourceRef),
+    plan.ruleId,
+    plan.createdAt,
+    plan.updatedAt,
+  );
+}
+
+export function listFollowUpPlans(db: DatabaseSync, cipher: FieldCipher): FollowUpPlan[] {
+  const rows = db
+    .prepare(`SELECT ${PLAN_COLUMNS} FROM follow_up_plans ORDER BY created_at, id`)
+    .all() as unknown as PlanRow[];
+  return rows.map((row) => rowToPlan(row, cipher));
+}
+
+export function findFollowUpPlanById(
+  db: DatabaseSync,
+  cipher: FieldCipher,
+  id: string,
+): FollowUpPlan | null {
+  const row = db.prepare(`SELECT ${PLAN_COLUMNS} FROM follow_up_plans WHERE id = ?`).get(id) as
+    | PlanRow
+    | undefined;
+  if (row === undefined) {
+    return null;
+  }
+  return rowToPlan(row, cipher);
+}
+
+export function updateFollowUpPlanStatus(
+  db: DatabaseSync,
+  input: { id: string; status: FollowUpPlan['status']; updatedAt: string },
+): void {
+  db.prepare('UPDATE follow_up_plans SET status = ?, updated_at = ? WHERE id = ?').run(
+    input.status,
+    input.updatedAt,
+    input.id,
+  );
+}
+
+const RULE_COLUMNS =
+  'id, test_code, test_name, interval_iso, upcoming_days, overdue_days, enabled, version, jurisdiction, valid_from, valid_to, created_at';
+
+interface RuleRow {
+  id: string;
+  test_code: string | null;
+  test_name: string | null;
+  interval_iso: string | null;
+  upcoming_days: number;
+  overdue_days: number;
+  enabled: number;
+  version: number;
+  jurisdiction: string | null;
+  valid_from: string | null;
+  valid_to: string | null;
+  created_at: string;
+}
+
+function rowToRule(row: RuleRow, cipher: FieldCipher): FollowUpRule {
+  const id = row.id;
+  return {
+    id,
+    testCode: cipher.dec(RULE_SCOPE, id, 'test_code', row.test_code),
+    testName: cipher.dec(RULE_SCOPE, id, 'test_name', row.test_name) ?? '',
+    intervalIso: cipher.dec(RULE_SCOPE, id, 'interval_iso', row.interval_iso) ?? '',
+    upcomingDays: row.upcoming_days,
+    overdueDays: row.overdue_days,
+    enabled: row.enabled === 1,
+    version: row.version,
+    jurisdiction: cipher.dec(RULE_SCOPE, id, 'jurisdiction', row.jurisdiction),
+    validFrom: cipher.dec(RULE_SCOPE, id, 'valid_from', row.valid_from),
+    validTo: cipher.dec(RULE_SCOPE, id, 'valid_to', row.valid_to),
+    createdAt: row.created_at,
+  };
+}
+
+export function insertFollowUpRule(
+  db: DatabaseSync,
+  cipher: FieldCipher,
+  rule: FollowUpRule,
+): void {
+  const id = rule.id;
+  db.prepare(
+    `INSERT INTO follow_up_rules (
+      id, test_code, test_name, interval_iso, upcoming_days, overdue_days, enabled, version,
+      jurisdiction, valid_from, valid_to, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    id,
+    cipher.enc(RULE_SCOPE, id, 'test_code', rule.testCode),
+    cipher.enc(RULE_SCOPE, id, 'test_name', rule.testName),
+    cipher.enc(RULE_SCOPE, id, 'interval_iso', rule.intervalIso),
+    rule.upcomingDays,
+    rule.overdueDays,
+    rule.enabled ? 1 : 0,
+    rule.version,
+    cipher.enc(RULE_SCOPE, id, 'jurisdiction', rule.jurisdiction),
+    cipher.enc(RULE_SCOPE, id, 'valid_from', rule.validFrom),
+    cipher.enc(RULE_SCOPE, id, 'valid_to', rule.validTo),
+    rule.createdAt,
+  );
+}
+
+export function listFollowUpRules(db: DatabaseSync, cipher: FieldCipher): FollowUpRule[] {
+  const rows = db
+    .prepare(`SELECT ${RULE_COLUMNS} FROM follow_up_rules ORDER BY version, id`)
+    .all() as unknown as RuleRow[];
+  return rows.map((row) => rowToRule(row, cipher));
 }

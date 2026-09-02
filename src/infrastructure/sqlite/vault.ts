@@ -110,6 +110,46 @@ export const VAULT_MIGRATIONS: string[] = [
     version INTEGER PRIMARY KEY,
     applied_at TEXT NOT NULL
   );`,
+  `CREATE TABLE IF NOT EXISTS follow_up_rules (
+    id TEXT PRIMARY KEY,
+    test_code TEXT,
+    test_name TEXT NOT NULL,
+    interval_iso TEXT NOT NULL,
+    upcoming_days INTEGER NOT NULL DEFAULT 14,
+    overdue_days INTEGER NOT NULL DEFAULT 0,
+    enabled INTEGER NOT NULL DEFAULT 0 CHECK (enabled IN (0, 1)),
+    version INTEGER NOT NULL,
+    jurisdiction TEXT,
+    valid_from TEXT,
+    valid_to TEXT,
+    created_at TEXT NOT NULL
+  );`,
+  `CREATE TABLE IF NOT EXISTS follow_up_plans (
+    id TEXT PRIMARY KEY,
+    test_code TEXT,
+    test_name TEXT NOT NULL,
+    basis TEXT NOT NULL CHECK (basis IN ('clinician_instruction', 'titular_plan')),
+    basis_text TEXT NOT NULL,
+    interval_iso TEXT,
+    due_date_exact TEXT,
+    anchor_at TEXT NOT NULL,
+    upcoming_days INTEGER NOT NULL DEFAULT 14,
+    overdue_days INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL CHECK (status IN (
+      'borrador', 'confirmado', 'activo', 'cumplido', 'cancelado', 'reemplazado'
+    )),
+    document_id TEXT,
+    observation_id TEXT,
+    provider_id TEXT,
+    source_ref TEXT,
+    rule_id TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (document_id) REFERENCES clinical_documents(id),
+    FOREIGN KEY (observation_id) REFERENCES observations(id),
+    FOREIGN KEY (provider_id) REFERENCES providers(id),
+    FOREIGN KEY (rule_id) REFERENCES follow_up_rules(id)
+  );`,
 ];
 
 export function openVault(sqlitePath: string): DatabaseSync {

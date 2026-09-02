@@ -347,3 +347,45 @@ describe('crud clinico en boveda aislada', () => {
     }
   });
 });
+
+describe('seguimiento explicable F2-B', () => {
+  it('vitamina D sintetica con indicacion P3M, sin evidencia y revocada', async () => {
+    const { clinical, signUp } = harness();
+    const ctx = await signUp(personaA);
+    const { document, observation, provider } = await cargarVitaminaD(clinical, ctx);
+    clinical.confirmObservation(ctx, observation.id);
+
+    const sinPlan = clinical.answerFollowUp(ctx, { asOf: '2026-09-02T12:00:00-04:00' });
+    expect(sinPlan.items[0]?.evidence).toBe('sin_evidencia');
+    expect(sinPlan.items[0]?.dueDate).toBeNull();
+    expect(sinPlan.safetyNotice.length).toBeGreaterThan(10);
+
+    const plan = clinical.createFollowUpPlan(ctx, {
+      testCode: SYNTHETIC_VITAMIN_D_OBSERVATION.code,
+      testName: SYNTHETIC_VITAMIN_D_OBSERVATION.originalName,
+      basis: 'clinician_instruction',
+      basisText: 'Repetir examen en 3 meses',
+      intervalIso: 'P3M',
+      anchorAt: SYNTHETIC_VITAMIN_D_OBSERVATION.effectiveAt,
+      documentId: document.id,
+      observationId: observation.id,
+      providerId: provider.id,
+      sourceRef: 'pagina 2',
+    });
+    expect(plan.status).toBe('activo');
+
+    const due = clinical.answerFollowUp(ctx, { asOf: '2026-09-02T12:00:00-04:00' });
+    expect(due.items).toHaveLength(1);
+    expect(due.items[0]?.status).toBe('due');
+    expect(due.items[0]?.dueDate).toBe('2026-09-02');
+    expect(due.items[0]?.evidence).toBe('con_evidencia');
+    expect(due.items[0]?.explanation).toContain('septiembre');
+
+    const revoked = clinical.revokeFollowUpPlan(ctx, plan.id);
+    expect(revoked.status).toBe('cancelado');
+    const afterRevoke = clinical.answerFollowUp(ctx, { asOf: '2026-09-02T12:00:00-04:00' });
+    expect(afterRevoke.items[0]?.status).toBe('cancelled');
+    expect(afterRevoke.items[0]?.dueDate).toBeNull();
+    expect(afterRevoke.items[0]?.evidence).toBe('sin_evidencia');
+  });
+});

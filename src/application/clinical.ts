@@ -16,6 +16,15 @@ import {
   type Provider,
 } from '../domain/clinical.ts';
 import {
+  evaluateFollowUps,
+  type FollowUpAnswer,
+  type FollowUpPlan,
+  type FollowUpPlanStatus,
+  type FollowUpRule,
+  parseIsoDuration,
+  parseYmd,
+} from '../domain/followup.ts';
+import {
   createFieldCipher,
   type FieldCipher,
   unwrapDataKey,
@@ -24,6 +33,7 @@ import { findVaultByAccount } from '../infrastructure/sqlite/catalog.ts';
 import {
   findAppointmentById,
   findDocumentById,
+  findFollowUpPlanById,
   findObservationById,
   findProfile,
   findProviderById,
@@ -31,6 +41,8 @@ import {
   insertAppointment,
   insertAuditEntry,
   insertDocument,
+  insertFollowUpPlan,
+  insertFollowUpRule,
   insertObservation,
   insertObservationVersion,
   insertProfile,
@@ -39,11 +51,14 @@ import {
   listAppointments,
   listAuditEntries,
   listDocuments,
+  listFollowUpPlans,
+  listFollowUpRules,
   listObservations as listObservationRows,
   listObservationVersions,
   listProviders,
   listReports,
   updateAppointmentStatus,
+  updateFollowUpPlanStatus,
   updateObservation,
   updateProfile,
 } from '../infrastructure/sqlite/clinical.ts';
@@ -249,6 +264,71 @@ const auditLimitSchema = z.number().int().min(1).max(500).default(100);
 
 const observationFilterSchema = z.object({ reportId: z.uuid().optional() });
 
+const followUpPlanSchema = z
+  .object({
+    testCode: z.string().trim().min(1).max(50).nullish(),
+    testName: z.string().trim().min(1).max(300),
+    basis: z.enum(['clinician_instruction', 'titular_plan']),
+    basisText: z.string().trim().min(1).max(500),
+    intervalIso: z.string().trim().min(2).max(20).nullish(),
+    dueDateExact: clinicalDate.nullish(),
+    anchorAt: clinicalDate,
+    upcomingDays: z.number().int().min(0).max(365).default(14),
+    overdueDays: z.number().int().min(0).max(365).default(0),
+    status: z.enum(['borrador', 'confirmado', 'activo']).default('activo'),
+    documentId: z.uuid().nullish(),
+    observationId: z.uuid().nullish(),
+    providerId: z.uuid().nullish(),
+    sourceRef: z.string().trim().min(1).max(200).nullish(),
+    ruleId: z.uuid().nullish(),
+  })
+  .superRefine((value, ctx) => {
+    if (
+      (value.intervalIso === undefined || value.intervalIso === null) &&
+      (value.dueDateExact === undefined || value.dueDateExact === null)
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'El plan exige intervalo ISO (P3M) o una fecha exacta.',
+      });
+    }
+    if (value.intervalIso !== undefined && value.intervalIso !== null) {
+      try {
+        parseIsoDuration(value.intervalIso);
+      } catch (err) {
+        ctx.addIssue({
+          code: 'custom',
+          message: err instanceof Error ? err.message : 'Intervalo invalido.',
+        });
+      }
+    }
+    try {
+      parseYmd(value.anchorAt);
+    } catch (err) {
+      ctx.addIssue({
+        code: 'custom',
+        message: err instanceof Error ? err.message : 'Ancla invalida.',
+      });
+    }
+  });
+
+const followUpRuleSchema = z.object({
+  testCode: z.string().trim().min(1).max(50).nullish(),
+  testName: z.string().trim().min(1).max(300),
+  intervalIso: z.string().trim().min(2).max(20),
+  upcomingDays: z.number().int().min(0).max(365).default(14),
+  overdueDays: z.number().int().min(0).max(365).default(0),
+  enabled: z.boolean().default(false),
+  version: z.number().int().min(1).max(10_000),
+  jurisdiction: z.string().trim().min(1).max(80).nullish(),
+  validFrom: clinicalDate.nullish(),
+  validTo: clinicalDate.nullish(),
+});
+
+const followUpQuerySchema = z.object({
+  asOf: z.iso.datetime({ offset: true }).optional(),
+});
+
 function parseOrThrow<T>(schema: z.ZodType<T>, input: unknown): T {
   const result = schema.safeParse(input);
   if (!result.success) {
@@ -393,6 +473,11 @@ export interface ClinicalService {
   ): ObservationView;
   listObservationVersions(ctx: VaultContext, observationId: string): ObservationVersion[];
   listAudit(ctx: VaultContext, limit?: number): AuditEntry[];
+  createFollowUpPlan(ctx: VaultContext, input: z.input<typeof followUpPlanSchema>): FollowUpPlan;
+  listFollowUpPlans(ctx: VaultContext): FollowUpPlan[];
+  revokeFollowUpPlan(ctx: VaultContext, id: string): FollowUpPlan;
+  createFollowUpRule(ctx: VaultContext, input: z.input<typeof followUpRuleSchema>): FollowUpRule;
+  answerFollowUp(ctx: VaultContext, query?: { asOf?: string }): FollowUpAnswer;
 }
 
 export function createClinicalService(deps: { clock: Clock }): ClinicalService {
@@ -755,6 +840,129 @@ export function createClinicalService(deps: { clock: Clock }): ClinicalService {
       const entries = listAuditEntries(ctx.db, limit);
       audit(ctx, clock, 'auditoria.listada', 'audit_log', null, { count: entries.length });
       return entries;
+    },
+
+    createFollowUpPlan(ctx, rawInput) {
+      return clinical(() => {
+        const input = parseOrThrow(followUpPlanSchema, rawInput);
+        if (input.documentId !== undefined && input.documentId !== null) {
+          requireExisting(
+            findDocumentById(ctx.db, ctx.cipher, input.documentId),
+            'El documento referenciado no existe en esta boveda.',
+          );
+        }
+        if (input.observationId !== undefined && input.observationId !== null) {
+          requireExisting(
+            findObservationById(ctx.db, ctx.cipher, input.observationId),
+            'La observacion referenciada no existe en esta boveda.',
+          );
+        }
+        if (input.providerId !== undefined && input.providerId !== null) {
+          requireExisting(
+            findProviderById(ctx.db, ctx.cipher, input.providerId),
+            'El proveedor referenciado no existe en esta boveda.',
+          );
+        }
+        const now = clock.now().toISOString();
+        const plan: FollowUpPlan = {
+          id: newId(),
+          testCode: input.testCode ?? null,
+          testName: input.testName,
+          basis: input.basis,
+          basisText: input.basisText,
+          intervalIso: input.intervalIso ?? null,
+          dueDateExact: input.dueDateExact ?? null,
+          anchorAt: input.anchorAt,
+          upcomingDays: input.upcomingDays,
+          overdueDays: input.overdueDays,
+          status: input.status,
+          documentId: input.documentId ?? null,
+          observationId: input.observationId ?? null,
+          providerId: input.providerId ?? null,
+          sourceRef: input.sourceRef ?? null,
+          ruleId: input.ruleId ?? null,
+          createdAt: now,
+          updatedAt: now,
+        };
+        insertFollowUpPlan(ctx.db, ctx.cipher, plan);
+        audit(ctx, clock, 'seguimiento.plan_creado', 'follow_up_plan', plan.id);
+        return plan;
+      });
+    },
+
+    listFollowUpPlans(ctx) {
+      const plans = listFollowUpPlans(ctx.db, ctx.cipher);
+      audit(ctx, clock, 'seguimiento.planes_listados', 'follow_up_plan', null, {
+        count: plans.length,
+      });
+      return plans;
+    },
+
+    revokeFollowUpPlan(ctx, id) {
+      return clinical(() => {
+        const current = findFollowUpPlanById(ctx.db, ctx.cipher, id);
+        if (current === null) {
+          auditDeniedThenNotFound(ctx, clock, 'seguimiento.plan_revocado', 'follow_up_plan', id);
+        }
+        if (current.status === 'cancelado') {
+          return current;
+        }
+        const updatedAt = clock.now().toISOString();
+        updateFollowUpPlanStatus(ctx.db, { id: current.id, status: 'cancelado', updatedAt });
+        audit(ctx, clock, 'seguimiento.plan_revocado', 'follow_up_plan', current.id);
+        return { ...current, status: 'cancelado' as FollowUpPlanStatus, updatedAt };
+      });
+    },
+
+    createFollowUpRule(ctx, rawInput) {
+      return clinical(() => {
+        const input = parseOrThrow(followUpRuleSchema, rawInput);
+        parseIsoDuration(input.intervalIso);
+        const rule: FollowUpRule = {
+          id: newId(),
+          testCode: input.testCode ?? null,
+          testName: input.testName,
+          intervalIso: input.intervalIso,
+          upcomingDays: input.upcomingDays,
+          overdueDays: input.overdueDays,
+          enabled: input.enabled,
+          version: input.version,
+          jurisdiction: input.jurisdiction ?? null,
+          validFrom: input.validFrom ?? null,
+          validTo: input.validTo ?? null,
+          createdAt: clock.now().toISOString(),
+        };
+        insertFollowUpRule(ctx.db, ctx.cipher, rule);
+        audit(ctx, clock, 'seguimiento.regla_creada', 'follow_up_rule', rule.id, {
+          enabled: rule.enabled,
+          version: rule.version,
+        });
+        return rule;
+      });
+    },
+
+    answerFollowUp(ctx, rawQuery) {
+      const query = rawQuery === undefined ? {} : parseOrThrow(followUpQuerySchema, rawQuery);
+      const asOf = query.asOf === undefined ? clock.now() : new Date(query.asOf);
+      const profile = findProfile(ctx.db, ctx.cipher);
+      const observations = listObservationRows(ctx.db, ctx.cipher);
+      const reports = listReports(ctx.db, ctx.cipher);
+      const documentIdByReportId = new Map<string, string | null>();
+      for (const report of reports) {
+        documentIdByReportId.set(report.id, report.documentId);
+      }
+      const answer = evaluateFollowUps({
+        asOf,
+        timeZone: profile?.timezone ?? null,
+        plans: listFollowUpPlans(ctx.db, ctx.cipher),
+        rules: listFollowUpRules(ctx.db, ctx.cipher),
+        observations,
+        documentIdByReportId,
+      });
+      audit(ctx, clock, 'seguimiento.consultado', 'follow_up', null, {
+        items: answer.items.length,
+      });
+      return answer;
     },
   };
 }

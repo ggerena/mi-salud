@@ -101,6 +101,31 @@ const ENCRYPTED_TABLES: EncryptedTable[] = [
     scope: 'observation_versions',
     columns: [{ name: 'payload', numeric: false }],
   },
+  {
+    table: 'follow_up_rules',
+    scope: 'follow_up_rules',
+    columns: [
+      { name: 'test_code', numeric: false },
+      { name: 'test_name', numeric: false },
+      { name: 'interval_iso', numeric: false },
+      { name: 'jurisdiction', numeric: false },
+      { name: 'valid_from', numeric: false },
+      { name: 'valid_to', numeric: false },
+    ],
+  },
+  {
+    table: 'follow_up_plans',
+    scope: 'follow_up_plans',
+    columns: [
+      { name: 'test_code', numeric: false },
+      { name: 'test_name', numeric: false },
+      { name: 'basis_text', numeric: false },
+      { name: 'interval_iso', numeric: false },
+      { name: 'due_date_exact', numeric: false },
+      { name: 'anchor_at', numeric: false },
+      { name: 'source_ref', numeric: false },
+    ],
+  },
 ];
 
 function markerCount(db: DatabaseSync): number {
