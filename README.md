@@ -6,7 +6,7 @@ El diseño prioriza una instalación sencilla y económica: un contenedor, SQLit
 
 ## Estado
 
-El proyecto se encuentra en **desarrollo temprano (Fase 0 del MVP)**: base reproducible y barreras ya implementadas. Aun no incluye autenticacion, bovedas ni datos clinicos; solo estructura, configuracion fail-closed, servidor HTTP minimo (`/`, `/health`, `/ready`), Docker y CI.
+El proyecto se encuentra en **desarrollo temprano (Fases 0 y 1 del MVP)**: base, barreras, Google OIDC con proveedor falso en pruebas, sesiones y bovedas aisladas cifradas. Aun no hay documentos clinicos, FHIR ni MCP.
 
 Documentos principales:
 

@@ -1,6 +1,8 @@
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { secureHeaders } from 'hono/secure-headers';
+import type { AuthService } from '../application/auth.ts';
+import { mountSite } from '../interfaces/web/site.ts';
 import { AppError } from '../shared/errors.ts';
 import type { Config } from './config.ts';
 import type { Logger } from './logger.ts';
@@ -8,6 +10,7 @@ import type { Logger } from './logger.ts';
 export interface AppDeps {
   config: Config;
   logger: Logger;
+  auth?: AuthService;
 }
 
 export function createApp(deps: AppDeps): Hono {
@@ -51,14 +54,7 @@ export function createApp(deps: AppDeps): Hono {
     c.json({ error: { code: 'not_found', message: 'Recurso no encontrado.' } }, 404),
   );
 
-  app.get('/', (c) =>
-    c.html(
-      '<!doctype html><html lang="es"><head><meta charset="utf-8">' +
-        '<title>MiSalud</title></head><body><h1>MiSalud</h1>' +
-        '<p>Boveda personal de salud. Estado del sistema: <a href="/health">health</a>.</p>' +
-        '</body></html>',
-    ),
-  );
+  mountSite(app, { config, auth: deps.auth });
 
   app.get('/health', (c) => c.json({ status: 'ok' }));
 

@@ -16,7 +16,7 @@ describe('barreras HTTP de Fase 0', () => {
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain('MiSalud');
-    expect(html).not.toMatch(/https?:\/\//);
+    expect(html).not.toMatch(/https?:\/\/(?!127\.0\.0\.1)/);
     expect(res.headers.get('x-content-type-options')).toBe('nosniff');
     expect(res.headers.get('x-frame-options')).toBe('DENY');
   });

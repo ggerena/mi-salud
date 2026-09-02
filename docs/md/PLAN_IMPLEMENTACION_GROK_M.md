@@ -539,7 +539,7 @@ No responder sólo con un plan: el pedido autoriza implementación. No afirmar t
 
 ## 13. Registro de ejecución (Grok-M)
 
-**Estado actual:** parcial — Fase 0 usable tras correcciones de revisión; CI del commit de GLM estaba en rojo y se corrigió. MVP completo sigue pendiente.
+**Estado actual:** parcial — Fases 0 y 1 en `feat/initial-mvp`. MVP completo sigue pendiente.
 
 | Fecha (Santiago) | Paso | Resultado |
 | --- | --- | --- |
@@ -583,3 +583,16 @@ No responder sólo con un plan: el pedido autoriza implementación. No afirmar t
 **Pruebas de esta revisión (HEAD local, luego el commit de corrección):** lint OK; typecheck OK; unit+integration 15/15; smoke 2/2; `npm audit --omit=dev --audit-level=high` 0; imagen `mi-salud:local` construida; `docker compose up` efímero: `/health` y `/ready` en `127.0.0.1:8080`, uid 1000, incluso con `HOST=127.0.0.1` en `.env`.
 
 **Pendientes / NO PROBADO:** Gitleaks de CI sobre el commit nuevo; volumenes nombrados siguen root (sin escritura en Fase 0); logs no redactan strings sueltos sin nombre de campo sensible; OIDC/bóvedas/clínica/FHIR/MCP no implementados.
+
+## Registro Fase 1 (Grok-M)
+
+Identidad y bovedas, sin clinica.
+
+- Catalogo SQLite global (iss+sub, allowlist, consentimientos, sesiones con hash, bovedas).
+- Primer Google valido = propietario; el siguiente exige allowlist.
+- OIDC: `openid-client` 6.8.7 para Google; FakeOidcProvider en pruebas (sin red).
+- Cookies HttpOnly, SameSite=Lax, Secure en production; CSRF por Origin; logout revoca.
+- Clave de boveda envuelta AES-256-GCM; AAD incluye vault id.
+- Paginas: inicio, login, consentimiento, cuenta.
+
+**NO PROBADO:** intercambio real contra accounts.google.com (requiere cliente OIDC de Gery). Esquema SQL clinico de la boveda (Fase 2).

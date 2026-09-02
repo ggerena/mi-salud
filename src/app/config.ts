@@ -43,6 +43,12 @@ const envSchema = z.object({
   MISALUD_OBJECTS_DIR: z.string().min(1).default('./objects'),
   MISALUD_MAX_BODY_BYTES: z.coerce.number().int().min(1024).max(104_857_600).default(10_485_760),
   MISALUD_LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
+  MISALUD_PUBLIC_ORIGIN: z.string().default('http://127.0.0.1:8080'),
+  MISALUD_SESSION_TTL_SECONDS: z.coerce.number().int().min(60).max(86_400).default(28_800),
+  OIDC_ISSUER: z.string().default('https://accounts.google.com'),
+  OIDC_CLIENT_ID: z.string().optional(),
+  OIDC_CLIENT_SECRET: z.string().optional(),
+  OIDC_REDIRECT_URI: z.string().optional(),
 });
 
 export interface Config {
@@ -54,6 +60,13 @@ export interface Config {
   maxBodyBytes: number;
   logLevel: 'debug' | 'info' | 'warn' | 'error';
   masterKey: Buffer;
+  publicOrigin: string;
+  sessionTtlMs: number;
+  cookieSecure: boolean;
+  oidcIssuer: string;
+  oidcClientId: string | undefined;
+  oidcClientSecret: string | undefined;
+  oidcRedirectUri: string | undefined;
 }
 
 export function loadConfig(env: Record<string, string | undefined> = process.env): Config {
@@ -100,5 +113,19 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     maxBodyBytes: parsed.data.MISALUD_MAX_BODY_BYTES,
     logLevel: parsed.data.MISALUD_LOG_LEVEL,
     masterKey,
+    publicOrigin: parsed.data.MISALUD_PUBLIC_ORIGIN.replace(/\/$/, ''),
+    sessionTtlMs: parsed.data.MISALUD_SESSION_TTL_SECONDS * 1000,
+    cookieSecure: parsed.data.NODE_ENV === 'production',
+    oidcIssuer: parsed.data.OIDC_ISSUER,
+    oidcClientId: emptyToUndef(parsed.data.OIDC_CLIENT_ID),
+    oidcClientSecret: emptyToUndef(parsed.data.OIDC_CLIENT_SECRET),
+    oidcRedirectUri: emptyToUndef(parsed.data.OIDC_REDIRECT_URI),
   };
+}
+
+function emptyToUndef(value: string | undefined): string | undefined {
+  if (value === undefined || value.trim() === '') {
+    return undefined;
+  }
+  return value;
 }
