@@ -45,12 +45,10 @@ export class GoogleOidcProvider implements OidcProvider {
       if (claims === undefined) {
         throw new AuthFlowError('El ID token no trajo claims.');
       }
-      const iss = claims.iss;
-      const sub = claims.sub;
+      const { iss, sub, email: emailClaim } = claims;
       if (typeof iss !== 'string' || typeof sub !== 'string') {
         throw new AuthFlowError('iss o sub ausentes.');
       }
-      const emailClaim = claims['email'];
       const email = typeof emailClaim === 'string' ? emailClaim : null;
       return { iss, sub, email };
     } catch (err) {

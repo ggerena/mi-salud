@@ -539,7 +539,7 @@ No responder sólo con un plan: el pedido autoriza implementación. No afirmar t
 
 ## 13. Registro de ejecución (Grok-M)
 
-**Estado actual:** parcial — Fases 0 y 1 en `main` (`f7670f8`). Grok-M no abre Fase 2: cuota insuficiente para cerrarla. Codex coordina el siguiente subencargo, un agente a la vez.
+**Estado actual:** Fases 0, 1 y subencargo F2-A en `main`. F2-B (motor de seguimiento) no se inicia: lo define quien coordine la semántica clínica. Codex coordina el siguiente subencargo, un agente a la vez.
 
 | Fecha (Santiago) | Paso | Resultado |
 | --- | --- | --- |
@@ -550,6 +550,7 @@ No responder sólo con un plan: el pedido autoriza implementación. No afirmar t
 | 2026-09-02 | Revisión Grok-M de `362da4e` | CI rojo: lint Biome y Gitleaks `generic-api-key` en fixture sintético. `.gitignore` `objects/` ocultaba `src/infrastructure/objects/`. Compose podía heredar `HOST=127.0.0.1` del `.env` y dejar el contenedor inalcanzable. |
 | 2026-09-02 | Cambio de rama (Gery) | Respaldo `backup/mvp-c9a32de` + tag `backup/mvp-feat-initial-mvp-c9a32de`. Fases 0-1 validadas pasan a `main` con push directo. CI de push apunta a `main`. Sin deploy. |
 | 2026-09-02 | Pausa por cuota | Grok-M no abre Fase 2. Handoff en seccion 14 (F2-A). Codex coordina, un agente a la vez. |
+| 2026-09-02 | F2-A — esquema y CRUD de bóveda (GLM-5.3) | Ver sección "Registro F2-A (GLM-5.3)" abajo. Commit y push directo a `main` autorizados por Gery tras verificaciones verdes. |
 
 ## Registro Fase 0 (GLM-5.3-Flash)
 
@@ -599,11 +600,43 @@ Identidad y bovedas, sin clinica.
 
 **NO PROBADO:** intercambio real contra accounts.google.com (requiere cliente OIDC de Gery). Esquema SQL clinico de la boveda (Fase 2).
 
+## Registro F2-A (GLM-5.3)
+
+Esquema SQL por bóveda y CRUD clínico mínimo, sin motor de seguimiento. Commit y push directo a `main` autorizados por Gery en la sesión del 2026-09-02.
+
+**Decisiones mecánicas (sin ampliar alcance):**
+
+- Bóveda SQLite en la ruta ya guardada en el catálogo (`findVaultByAccount` → `openVault`): WAL, `foreign_keys=ON`, `busy_timeout=5000`, migraciones transaccionales con `schema_migrations`.
+- Contenido clínico en claro dentro del archivo SQLite de cada bóveda (aislamiento por archivo + FK). El cifrado por campo queda para más adelante; la clave envuelta por bóveda ya existe desde Fase 1.
+- Sin endpoints web nuevos: el CRUD vive en `src/application/clinical.ts` y se prueba a nivel de casos de uso. `VaultContext` (vaultId, accountId, db) se resuelve solo desde la cuenta autenticada (`openVaultContext`), nunca desde input del cliente.
+- Estados de observación: entrada manual crea `requiere_confirmacion` (o `confirmado` si se marca); `extraido` solo lo producirá la capa de extracción futura (probado insertando por repositorio). Confirmar solo desde `extraido`/`requiere_confirmacion`. Corregir guarda snapshot en `observation_versions` (versión previa), incrementa `version` y deja estado `corregido`. La vista nunca presenta un `extraido` como revisado (`humanReviewed`).
+- Sin conversión de unidades: `unit_normalized` siempre nulo en esta fase; se conservan nombre, unidad, rango y marca originales del laboratorio. Fecha de toma (`effective_at`) separada de la del informe (`reported_at`).
+- Corrección con semántica de campos presentes: un campo explícito en `null` limpia; un campo ausente se conserva.
+- Auditoría de cada mutación (acción, actor, recurso, resultado) con `detail` solo de IDs y nombres de campos, sin contenido clínico.
+- Validación de entrada con Zod (UUID, ISO 8601 con zona para citas, fecha parcial para fechas clínicas, zona horaria IANA real). Errores de reglas clínicas y de entrada salen como `bad_request` (400); recursos inexistentes como `not_found` (404).
+- Vitamina D sintética igual al ejemplo de la especificación: 18 ng/mL, marca `bajo`, rango original `30 - 100 ng/mL`, toma 2026-06-02, informe 2026-06-03, fuente "pagina 2", conclusión "Repetir examen en 3 meses." guardada como texto sin interpretar (sin inferir periodicidad).
+
+**Refactor dentro del alcance:** `runMigrations` extraído a `src/infrastructure/sqlite/migrate.ts` y `catalog.ts` refactorizado para usarlo (mismo comportamiento, sin duplicación).
+
+**Fix incidental fuera de la lista de archivos:** `src/infrastructure/oidc/google.ts:53` ya fallaba lint en `main` (Biome `useLiteralKeys` vs. `noPropertyAccessFromIndexSignature` de tsc, verificado con `git stash`). Resuelto con desestructuración `const { iss, sub, email: emailClaim } = claims`. Sin cambio de comportamiento.
+
+**Archivos creados:** `src/domain/clinical.ts`, `src/infrastructure/sqlite/migrate.ts`, `src/infrastructure/sqlite/vault.ts`, `src/infrastructure/sqlite/clinical.ts`, `src/application/clinical.ts`, `tests/fixtures/clinical.ts`, `tests/unit/clinical-domain.test.ts`, `tests/integration/vault.clinical.test.ts`.
+
+**Archivos modificados:** `src/infrastructure/sqlite/catalog.ts` (usa `runMigrations`), `src/infrastructure/oidc/google.ts` (fix lint), barrels `src/domain/index.ts`, `src/application/index.ts`, `src/infrastructure/sqlite/index.ts`.
+
+**Pruebas ejecutadas (locales, Node 24.18.0):** `npm run lint` OK; `npm run typecheck` OK; `npm test` 39/39 (15 nuevos: reglas de dominio, CRUD completo, IDOR entre dos bóvedas, `extraido` nunca presentado como confirmado y confirmación única, sin conversión de unidades ng/mL vs nmol/L, corrección con snapshot e historial, 400/404, re-apertura de bóveda sin re-aplicar migraciones, auditoría sin contenido clínico); `npm run test:smoke` 2/2 (incluye `npm run build`).
+
+**NO PROBADO:** CI de push sobre `main` (corre solo tras el push). Extracción real de documentos (no existe todavía). Endpoints web del CRUD (no construidos aquí).
+
+**Bloqueos:** ninguno.
+
+**Pendiente inmediato:** revisión del diff por un agente distinto (quien implementó no se revisa a sí mismo).
+
 ## 14. Siguiente subencargo (para Codex)
 
 Un solo escritor. Rama `main`. Tras pruebas verdes: commit y push a `main`. Sin deploy. Sin merge de PRs. Sin datos reales. Sin llamar a Google. Quien implemente no se revisa a si mismo.
 
-**Subencargo F2-A — esquema y repositorios de la boveda (sin motor de seguimiento)**
+**F2-A — esquema y repositorios de la bóveda: COMPLETADO (2026-09-02, GLM-5.3).** Ver "Registro F2-A (GLM-5.3)". Pendiente: revisión del diff por un agente distinto al implementador. El subencargo original queda documentado a continuación para la revisión.
 
 Objetivo: migraciones SQL por boveda y casos de uso CRUD minimos para perfil, profesional/organizacion, citas, documentos (metadatos), informes, observaciones y auditoria/procedencia. Todavia no OCR, no URLs, no “¿me toca?”.
 

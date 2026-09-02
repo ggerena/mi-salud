@@ -5,6 +5,7 @@ import { DatabaseSync } from 'node:sqlite';
 import type { Clock } from '../../shared/clock.ts';
 import { newId } from '../../shared/ids.ts';
 import { generateDataKey, type WrappedKey, wrapDataKey } from '../crypto/aead.ts';
+import { runMigrations } from './migrate.ts';
 
 export interface CatalogAccount {
   id: string;
@@ -94,39 +95,8 @@ export function openCatalog(dbPath: string): DatabaseSync {
   db.exec('PRAGMA foreign_keys = ON;');
   db.exec('PRAGMA journal_mode = WAL;');
   db.exec('PRAGMA busy_timeout = 5000;');
-  migrate(db);
+  runMigrations(db, MIGRATIONS);
   return db;
-}
-
-function migrate(db: DatabaseSync): void {
-  db.exec(MIGRATIONS[0] ?? '');
-  const row = db.prepare('SELECT COALESCE(MAX(version), 0) AS v FROM schema_migrations').get() as
-    | { v: number }
-    | undefined;
-  let current = row?.v ?? 0;
-  for (let i = 1; i < MIGRATIONS.length; i += 1) {
-    const version = i;
-    if (version <= current) {
-      continue;
-    }
-    const sql = MIGRATIONS[i];
-    if (sql === undefined) {
-      continue;
-    }
-    db.exec('BEGIN');
-    try {
-      db.exec(sql);
-      db.prepare('INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(
-        version,
-        new Date().toISOString(),
-      );
-      db.exec('COMMIT');
-      current = version;
-    } catch (err) {
-      db.exec('ROLLBACK');
-      throw err;
-    }
-  }
 }
 
 export function hashSessionToken(token: string): string {
