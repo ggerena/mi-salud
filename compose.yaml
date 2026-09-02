@@ -1,0 +1,30 @@
+services:
+  misalud:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: mi-salud:local
+    ports:
+      # Solo localhost en el host. Nunca exponer a la red.
+      - '127.0.0.1:8080:8080'
+    env_file:
+      - .env
+    volumes:
+      # Datos y objetos fuera del checkout, en volumenes nombrados.
+      # Nunca usar carpetas sincronizadas (Dropbox, OneDrive, Google Drive).
+      - misalud_data:/data
+      - misalud_objects:/objects
+    environment:
+      NODE_ENV: production
+      MISALUD_DATA_DIR: /data
+      MISALUD_OBJECTS_DIR: /objects
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+volumes:
+  misalud_data:
+  misalud_objects:

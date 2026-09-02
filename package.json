@@ -1,0 +1,35 @@
+{
+  "name": "mi-salud",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Boveda personal de salud autoalojada. Un proceso, una imagen, datos sinteticos.",
+  "license": "AGPL-3.0-or-later",
+  "type": "module",
+  "engines": {
+    "node": ">=24.20.0 <25"
+  },
+  "scripts": {
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run tests/unit tests/integration",
+    "test:integration": "vitest run tests/integration",
+    "test:smoke": "npm run build && vitest run tests/smoke",
+    "build": "tsc -p tsconfig.build.json",
+    "check:licenses": "node scripts/checks.mjs licenses",
+    "check:secrets": "node scripts/checks.mjs secrets",
+    "check:security": "node scripts/checks.mjs security",
+    "sbom": "node scripts/checks.mjs sbom"
+  },
+  "dependencies": {
+    "@hono/node-server": "2.1.1",
+    "hono": "4.13.5",
+    "zod": "4.5.4"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.11",
+    "@types/node": "24.10.1",
+    "typescript": "7.0.2",
+    "vitest": "4.1.11"
+  }
+}

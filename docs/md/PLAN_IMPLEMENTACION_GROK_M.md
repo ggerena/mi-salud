@@ -539,18 +539,31 @@ No responder sólo con un plan: el pedido autoriza implementación. No afirmar t
 
 ## 13. Registro de ejecución (Grok-M)
 
-**Estado actual:** parcial — arquitectura de Fase 0 fijada; andamiaje de código pendiente.
+**Estado actual:** parcial — Fase 0 (base y barreras) implementada por GLM-5.3-Flash; pendiente revisión de Grok-M.
 
 | Fecha (Santiago) | Paso | Resultado |
 | --- | --- | --- |
 | 2026-09-02 | Localizar encargo y repo | `C:\Users\gery_\Code\mi-salud`, rama `feat/initial-mvp`, PR borrador [#1](https://github.com/ggerena/mi-salud/pull/1) |
 | 2026-09-02 | ADR 0001 | `docs/md/ADR_0001_STACK_PROCESO_UNICO.md` — Node 24.20.0, Hono 4.13.5, `node:sqlite`, imagen `node:24.20.0-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e` |
 | 2026-09-02 | Coordinación | Gery pidió agentes más chicos. Andamiaje Fase 0 asignado a GLM-5.3-Flash (un solo escritor). Grok-M retiene OIDC, cifrado, aislamiento, clínica, revisión de seguridad. |
+| 2026-09-02 | Fase 0 — andamiaje (GLM-5.3-Flash) | Ver sección "Registro Fase 0 (GLM-5.3-Flash)" abajo. |
 
-**Archivos cambiados en este bloque:** `docs/md/ADR_0001_STACK_PROCESO_UNICO.md`, `docs/md/PLAN_IMPLEMENTACION_GROK_M.md`
+## Registro Fase 0 (GLM-5.3-Flash)
 
-**Pruebas:** no aplica (solo documentación de decisión).
+**Decisiones mecánicas (sin cambiar stack del ADR):**
 
-**Bloqueos:** ninguno. No se relaja alcance.
+- `bodyLimit` de Hono responde 413 con `Response` directo (tipado de `c.json` con genéricos no resolvía; comportamiento idéntico).
+- `check:secrets` requiere binario `gitleaks` local; si falta, falla con mensaje y remite al job de CI (envoltorio honesto del ADR).
+- SBOM vía `@cyclonedx/cyclonedx-npm` 4.1.2; `sbom.json` queda en `.gitignore`.
+- Imagen runtime usa `USER node` (uid 1000, ya existe en la imagen oficial); contenedor escucha 0.0.0.0 interno y Compose publica solo `127.0.0.1:8080:8080`. Volúmenes nombrados fuera del checkout, `read_only: true` y `no-new-privileges`.
+- `.nvmrc`/engines fijan 24.20.0; la máquina local tiene 24.18.0 (solo warning de engines; CI usa `node-version-file: .nvmrc` = 24.20.0).
 
-**Pendiente inmediato:** scaffolding Fase 0 según ADR (package, TS, Docker, CI, health, cabeceras, logging).
+**Archivos creados:** `package.json`, `package-lock.json`, `.nvmrc`, `tsconfig.json`, `tsconfig.build.json`, `biome.json`, `.env.example`, `Dockerfile`, `compose.yaml`, `.github/workflows/ci.yml`, `scripts/checks.mjs`, `src/**` (app: config/logger/server/main; barrels en domain/application/infrastructure/interfaces/shared), `tests/unit/config.test.ts`, `tests/unit/logger.test.ts`, `tests/integration/http.test.ts`, `tests/smoke/process.test.ts`, `tests/fixtures/keys.ts`, README actualizado.
+
+**Pruebas ejecutadas (locales, Node 24.18.0):** `npm run lint` OK; `npm run typecheck` OK (TS estricto, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`); `npm test` 15/15 verdes; `npm run test:smoke` 2/2 (proceso real arranca con clave sintética y falla cerrado sin clave); `npm run build` OK (emite `dist/` con extensiones reescritas); `npm run check:security` OK (0 vulnerabilidades `npm audit --omit=dev --audit-level=high`); `npm run check:licenses` OK; `npm run check:secrets` OK (gitleaks: no leaks); `npm run sbom` OK (CycloneDX).
+
+**NO PROBADO aquí:** build de imagen OCI y `docker compose up` (requiere Docker; queda para revisión de Grok-M/CI). CI completa solo en push.
+
+**Bloqueos:** ninguno.
+
+**Pendiente inmediato:** revisión del diff por Grok-M; imagen OCI en entorno con Docker.

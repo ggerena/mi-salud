@@ -6,12 +6,38 @@ El diseño prioriza una instalación sencilla y económica: un contenedor, SQLit
 
 ## Estado
 
-El proyecto se encuentra **detenido en análisis y diseño**. Todavía no contiene código ejecutable, dependencias ni contenedores. La implementación sólo comenzará después de una autorización explícita.
+El proyecto se encuentra en **desarrollo temprano (Fase 0 del MVP)**: base reproducible y barreras ya implementadas. Aun no incluye autenticacion, bovedas ni datos clinicos; solo estructura, configuracion fail-closed, servidor HTTP minimo (`/`, `/health`, `/ready`), Docker y CI.
 
 Documentos principales:
 
 - [Especificación funcional y técnica](docs/md/ESPECIFICACION_MISALUD.md)
 - [Auditoría estática de proyectos similares](docs/md/AUDITORIA_ESTATICA_CANDIDATOS.md)
+- [Plan de implementación](docs/md/PLAN_IMPLEMENTACION_GROK_M.md)
+- [ADR 0001 — stack y proceso único](docs/md/ADR_0001_STACK_PROCESO_UNICO.md)
+
+## Desarrollo local
+
+Requisitos: Node.js 24.20.0 (ver `.nvmrc`), npm.
+
+```bash
+npm install
+cp .env.example .env   # generar una MISALUD_MASTER_KEY propia de 32 bytes hex
+npm test
+npm run test:smoke     # build + proceso efimero en localhost
+```
+
+Comandos disponibles: `lint`, `typecheck`, `test`, `test:integration`, `test:smoke`, `build`, `check:licenses`, `check:secrets`, `check:security`, `sbom`.
+
+Nunca poner secretos, datos clinicos ni bases reales dentro del repositorio. Los datos y objetos viven en volumenes fuera del checkout; en Compose se usan volumenes nombrados y el puerto se publica solo en `127.0.0.1`.
+
+### Docker local
+
+```bash
+docker compose build
+# requerido: .env con MISALUD_MASTER_KEY (64 hex) generada fuera de Git
+docker compose up
+# comprobar: http://127.0.0.1:8080/health
+```
 
 ## Licencia
 

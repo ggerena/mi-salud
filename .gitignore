@@ -46,3 +46,6 @@ Thumbs.db
 .idea/
 .vscode/
 *.swp
+
+# SBOM generado localmente
+sbom.json
