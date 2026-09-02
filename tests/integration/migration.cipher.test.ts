@@ -90,7 +90,9 @@ describe('migracion de cifrado de campos', () => {
 
     // Verificar que el marcador de migración se insertó (openVaultContext ejecuta la migración)
     const markerCount = (
-      ctx.db.prepare('SELECT COUNT(*) AS n FROM field_cipher_migrations WHERE version = 1').get() as {
+      ctx.db
+        .prepare('SELECT COUNT(*) AS n FROM field_cipher_migrations WHERE version = 1')
+        .get() as {
         n: number;
       }
     ).n;
