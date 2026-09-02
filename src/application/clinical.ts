@@ -5,16 +5,21 @@ import {
   type AuditEntry,
   assertConfirmable,
   assertManualStatusAllowed,
-  assertValueMatchesKind,
   type ClinicalDocument,
   ClinicalRuleError,
   type DiagnosticReport,
   isHumanReviewed,
+  normalizeValueFields,
   type Observation,
   type ObservationVersion,
   type PatientProfile,
   type Provider,
 } from '../domain/clinical.ts';
+import {
+  createFieldCipher,
+  type FieldCipher,
+  unwrapDataKey,
+} from '../infrastructure/crypto/index.ts';
 import { findVaultByAccount } from '../infrastructure/sqlite/catalog.ts';
 import {
   findAppointmentById,
@@ -51,18 +56,50 @@ export interface VaultContext {
   vaultId: string;
   accountId: string;
   db: DatabaseSync;
+  cipher: FieldCipher;
 }
+
+interface CachedVault {
+  path: string;
+  db: DatabaseSync;
+  cipher: FieldCipher;
+}
+
+const vaultCache = new Map<string, CachedVault>();
 
 export function openVaultContext(deps: {
   catalogDb: DatabaseSync;
   accountId: string;
+  masterKey: Buffer;
 }): VaultContext | null {
   const vault = findVaultByAccount(deps.catalogDb, deps.accountId);
   if (vault === null) {
     return null;
   }
+  const cached = vaultCache.get(vault.id);
+  if (cached !== undefined && cached.path === vault.sqlitePath && cached.db.isOpen) {
+    return { vaultId: vault.id, accountId: deps.accountId, db: cached.db, cipher: cached.cipher };
+  }
+  const dataKey = unwrapDataKey({
+    masterKey: deps.masterKey,
+    wrapped: vault.wrapped,
+    aad: Buffer.from(`v1|vault|${vault.id}|data-key`, 'utf8'),
+  });
   const db = openVault(vault.sqlitePath);
-  return { vaultId: vault.id, accountId: deps.accountId, db };
+  const cipher = createFieldCipher({ vaultId: vault.id, dataKey });
+  dataKey.fill(0);
+  vaultCache.set(vault.id, { path: vault.sqlitePath, db, cipher });
+  return { vaultId: vault.id, accountId: deps.accountId, db, cipher };
+}
+
+export function closeVaultContext(vaultId: string): void {
+  const cached = vaultCache.get(vaultId);
+  if (cached !== undefined) {
+    if (cached.db.isOpen) {
+      cached.db.close();
+    }
+    vaultCache.delete(vaultId);
+  }
 }
 
 export interface ObservationView extends Observation {
@@ -74,9 +111,45 @@ function viewOf(observation: Observation): ObservationView {
 }
 
 const ISO_CLINICAL_DATE = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})?)?$/;
+
+function isRealCalendarDate(value: string): boolean {
+  const year = Number(value.slice(0, 4));
+  const month = Number(value.slice(5, 7));
+  const day = Number(value.slice(8, 10));
+  if (year < 1000 || year > 9999 || month < 1 || month > 12 || day < 1) {
+    return false;
+  }
+  const utc = new Date(Date.UTC(year, month - 1, day));
+  return (
+    utc.getUTCFullYear() === year && utc.getUTCMonth() === month - 1 && utc.getUTCDate() === day
+  );
+}
+
+function hasValidTimePart(value: string): boolean {
+  const timePart = value.slice(11);
+  if (timePart === '') {
+    return true;
+  }
+  const hours = Number(timePart.slice(0, 2));
+  const minutes = Number(timePart.slice(3, 5));
+  if (hours > 23 || minutes > 59) {
+    return false;
+  }
+  if (timePart.length >= 8) {
+    const seconds = Number(timePart.slice(6, 8));
+    if (seconds > 59) {
+      return false;
+    }
+  }
+  return true;
+}
+
 const clinicalDate = z
   .string()
-  .regex(ISO_CLINICAL_DATE, 'Fecha ISO 8601 invalida (YYYY-MM-DD o con hora y zona).');
+  .regex(ISO_CLINICAL_DATE, 'Fecha ISO 8601 invalida (YYYY-MM-DD o con hora y zona).')
+  .refine(isRealCalendarDate, 'La fecha no existe en el calendario (dia o mes imposibles).')
+  .refine(hasValidTimePart, 'La hora indicada no existe.');
+
 const scheduledAtSchema = z.iso.datetime({
   offset: true,
   message: 'La fecha de la cita exige ISO 8601 con hora y zona.',
@@ -89,7 +162,11 @@ const timezoneSchema = z
 
 const profileSchema = z.object({
   displayName: z.string().trim().min(1).max(200),
-  birthDate: clinicalDate.nullish(),
+  birthDate: clinicalDate
+    .nullish()
+    .refine((value) => value === null || value === undefined || new Date(value) <= new Date(), {
+      message: 'La fecha de nacimiento no puede ser futura.',
+    }),
   timezone: timezoneSchema.nullish(),
 });
 
@@ -183,12 +260,29 @@ function requireExisting<T>(value: T | null, message: string): T {
   return value;
 }
 
-function audit(
+function inTransaction<T>(db: DatabaseSync, fn: () => T): T {
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const result = fn();
+    db.exec('COMMIT');
+    return result;
+  } catch (err) {
+    try {
+      db.exec('ROLLBACK');
+    } catch {
+      // la transaccion ya no estaba activa; el error original manda
+    }
+    throw err;
+  }
+}
+
+function writeAudit(
   ctx: VaultContext,
   clock: Clock,
   action: string,
   resource: string,
   resourceId: string | null,
+  outcome: 'permitido' | 'denegado',
   detail?: Record<string, unknown>,
 ): void {
   insertAuditEntry(ctx.db, {
@@ -197,10 +291,32 @@ function audit(
     action,
     resource,
     resourceId,
-    outcome: 'permitido',
+    outcome,
     occurredAt: clock.now().toISOString(),
     detail: detail === undefined ? null : JSON.stringify(detail),
   });
+}
+
+function audit(
+  ctx: VaultContext,
+  clock: Clock,
+  action: string,
+  resource: string,
+  resourceId: string | null,
+  detail?: Record<string, unknown>,
+): void {
+  writeAudit(ctx, clock, action, resource, resourceId, 'permitido', detail);
+}
+
+function auditDeniedThenNotFound(
+  ctx: VaultContext,
+  clock: Clock,
+  action: string,
+  resource: string,
+  resourceId: string,
+): never {
+  writeAudit(ctx, clock, action, resource, resourceId, 'denegado');
+  notFound('Recurso no encontrado en esta boveda.');
 }
 
 function pickDefined<T extends Record<string, unknown>>(input: T): Partial<T> {
@@ -265,7 +381,7 @@ export function createClinicalService(deps: { clock: Clock }): ClinicalService {
       return clinical(() => {
         const input = parseOrThrow(profileSchema, rawInput);
         const now = clock.now().toISOString();
-        const existing = findProfile(ctx.db);
+        const existing = findProfile(ctx.db, ctx.cipher);
         if (existing === null) {
           const profile: PatientProfile = {
             id: newId(),
@@ -275,7 +391,7 @@ export function createClinicalService(deps: { clock: Clock }): ClinicalService {
             createdAt: now,
             updatedAt: now,
           };
-          insertProfile(ctx.db, profile);
+          insertProfile(ctx.db, ctx.cipher, profile);
           audit(ctx, clock, 'perfil.creado', 'patient_profile', profile.id);
           return profile;
         }
@@ -286,14 +402,18 @@ export function createClinicalService(deps: { clock: Clock }): ClinicalService {
           timezone: input.timezone ?? null,
           updatedAt: now,
         };
-        updateProfile(ctx.db, updated);
+        updateProfile(ctx.db, ctx.cipher, updated);
         audit(ctx, clock, 'perfil.actualizado', 'patient_profile', updated.id);
         return updated;
       });
     },
 
     getProfile(ctx) {
-      return findProfile(ctx.db);
+      const profile = findProfile(ctx.db, ctx.cipher);
+      if (profile !== null) {
+        audit(ctx, clock, 'perfil.leido', 'patient_profile', profile.id);
+      }
+      return profile;
     },
 
     createProvider(ctx, rawInput) {
@@ -306,14 +426,16 @@ export function createClinicalService(deps: { clock: Clock }): ClinicalService {
           role: input.role ?? null,
           createdAt: clock.now().toISOString(),
         };
-        insertProvider(ctx.db, provider);
+        insertProvider(ctx.db, ctx.cipher, provider);
         audit(ctx, clock, 'proveedor.creado', 'provider', provider.id);
         return provider;
       });
     },
 
     listProviders(ctx) {
-      return listProviders(ctx.db);
+      const providers = listProviders(ctx.db, ctx.cipher);
+      audit(ctx, clock, 'proveedores.listados', 'provider', null, { count: providers.length });
+      return providers;
     },
 
     createAppointment(ctx, rawInput) {
@@ -321,7 +443,7 @@ export function createClinicalService(deps: { clock: Clock }): ClinicalService {
         const input = parseOrThrow(appointmentSchema, rawInput);
         if (input.providerId !== undefined && input.providerId !== null) {
           requireExisting(
-            findProviderById(ctx.db, input.providerId),
+            findProviderById(ctx.db, ctx.cipher, input.providerId),
             'El proveedor referenciado no existe en esta boveda.',
           );
         }
@@ -337,19 +459,21 @@ export function createClinicalService(deps: { clock: Clock }): ClinicalService {
           createdAt: now,
           updatedAt: now,
         };
-        insertAppointment(ctx.db, appointment);
+        insertAppointment(ctx.db, ctx.cipher, appointment);
         audit(ctx, clock, 'cita.creada', 'appointment', appointment.id);
         return appointment;
       });
     },
 
     listAppointments(ctx) {
-      return listAppointments(ctx.db);
+      const appointments = listAppointments(ctx.db, ctx.cipher);
+      audit(ctx, clock, 'citas.listadas', 'appointment', null, { count: appointments.length });
+      return appointments;
     },
 
     cancelAppointment(ctx, id) {
       return clinical(() => {
-        const current = findAppointmentById(ctx.db, id);
+        const current = findAppointmentById(ctx.db, ctx.cipher, id);
         if (current === null) {
           notFound('Cita no encontrada en esta boveda.');
         }
@@ -385,14 +509,18 @@ export function createClinicalService(deps: { clock: Clock }): ClinicalService {
           createdAt: now,
           updatedAt: now,
         };
-        insertDocument(ctx.db, doc);
+        insertDocument(ctx.db, ctx.cipher, doc);
         audit(ctx, clock, 'documento.registrado', 'clinical_document', doc.id);
         return doc;
       });
     },
 
     listDocuments(ctx) {
-      return listDocuments(ctx.db);
+      const documents = listDocuments(ctx.db, ctx.cipher);
+      audit(ctx, clock, 'documentos.listados', 'clinical_document', null, {
+        count: documents.length,
+      });
+      return documents;
     },
 
     createReport(ctx, rawInput) {
@@ -400,13 +528,13 @@ export function createClinicalService(deps: { clock: Clock }): ClinicalService {
         const input = parseOrThrow(reportSchema, rawInput);
         if (input.documentId !== undefined && input.documentId !== null) {
           requireExisting(
-            findDocumentById(ctx.db, input.documentId),
+            findDocumentById(ctx.db, ctx.cipher, input.documentId),
             'El documento referenciado no existe en esta boveda.',
           );
         }
         if (input.providerId !== undefined && input.providerId !== null) {
           requireExisting(
-            findProviderById(ctx.db, input.providerId),
+            findProviderById(ctx.db, ctx.cipher, input.providerId),
             'El proveedor referenciado no existe en esta boveda.',
           );
         }
@@ -419,26 +547,28 @@ export function createClinicalService(deps: { clock: Clock }): ClinicalService {
           conclusion: input.conclusion ?? null,
           createdAt: clock.now().toISOString(),
         };
-        insertReport(ctx.db, report);
+        insertReport(ctx.db, ctx.cipher, report);
         audit(ctx, clock, 'informe.creado', 'diagnostic_report', report.id);
         return report;
       });
     },
 
     listReports(ctx) {
-      return listReports(ctx.db);
+      const reports = listReports(ctx.db, ctx.cipher);
+      audit(ctx, clock, 'informes.listados', 'diagnostic_report', null, { count: reports.length });
+      return reports;
     },
 
     addObservation(ctx, rawInput) {
       return clinical(() => {
         const input = parseOrThrow(addObservationSchema, rawInput);
         const report = requireExisting(
-          findReportById(ctx.db, input.diagnosticReportId),
+          findReportById(ctx.db, ctx.cipher, input.diagnosticReportId),
           'El informe referenciado no existe en esta boveda.',
         );
         const status = input.confirmed ? 'confirmado' : 'requiere_confirmacion';
         assertManualStatusAllowed(status);
-        assertValueMatchesKind({
+        const value = normalizeValueFields({
           valueKind: input.valueKind,
           valueQuantity: input.valueQuantity ?? null,
           valueText: input.valueText ?? null,
@@ -450,8 +580,8 @@ export function createClinicalService(deps: { clock: Clock }): ClinicalService {
           code: input.code ?? null,
           originalName: input.originalName,
           valueKind: input.valueKind,
-          valueQuantity: input.valueQuantity ?? null,
-          valueText: input.valueText ?? null,
+          valueQuantity: value.valueQuantity,
+          valueText: value.valueText,
           unitOriginal: input.unitOriginal ?? null,
           unitNormalized: null,
           referenceRangeOriginal: input.referenceRangeOriginal ?? null,
@@ -468,7 +598,7 @@ export function createClinicalService(deps: { clock: Clock }): ClinicalService {
           createdAt: now,
           updatedAt: now,
         };
-        insertObservation(ctx.db, observation);
+        insertObservation(ctx.db, ctx.cipher, observation);
         audit(ctx, clock, 'observacion.creada', 'observation', observation.id, {
           report_id: report.id,
         });
@@ -479,22 +609,27 @@ export function createClinicalService(deps: { clock: Clock }): ClinicalService {
     listObservations(ctx, rawFilter) {
       const filter =
         rawFilter === undefined ? {} : parseOrThrow(observationFilterSchema, rawFilter);
-      return listObservationRows(ctx.db, filter).map(viewOf);
+      const observations = listObservationRows(ctx.db, ctx.cipher, filter).map(viewOf);
+      audit(ctx, clock, 'observaciones.listadas', 'observation', null, {
+        count: observations.length,
+      });
+      return observations;
     },
 
     getObservation(ctx, id) {
-      const found = findObservationById(ctx.db, id);
+      const found = findObservationById(ctx.db, ctx.cipher, id);
       if (found === null) {
-        notFound('Observacion no encontrada en esta boveda.');
+        auditDeniedThenNotFound(ctx, clock, 'observacion.leida', 'observation', id);
       }
+      audit(ctx, clock, 'observacion.leida', 'observation', found.id);
       return viewOf(found);
     },
 
     confirmObservation(ctx, id) {
       return clinical(() => {
-        const current = findObservationById(ctx.db, id);
+        const current = findObservationById(ctx.db, ctx.cipher, id);
         if (current === null) {
-          notFound('Observacion no encontrada en esta boveda.');
+          auditDeniedThenNotFound(ctx, clock, 'observacion.confirmada', 'observation', id);
         }
         assertConfirmable(current.status);
         const updated: Observation = {
@@ -502,18 +637,23 @@ export function createClinicalService(deps: { clock: Clock }): ClinicalService {
           status: 'confirmado',
           updatedAt: clock.now().toISOString(),
         };
-        updateObservation(ctx.db, updated);
-        audit(ctx, clock, 'observacion.confirmada', 'observation', updated.id);
-        return viewOf(updated);
+        return inTransaction(ctx.db, () => {
+          const changed = updateObservation(ctx.db, ctx.cipher, updated, current.version);
+          if (!changed) {
+            throw new AppError(
+              'conflict',
+              409,
+              'La observacion fue modificada por otra operacion; reintenta.',
+            );
+          }
+          audit(ctx, clock, 'observacion.confirmada', 'observation', updated.id);
+          return viewOf(updated);
+        });
       });
     },
 
     correctObservation(ctx, id, rawChanges) {
       return clinical(() => {
-        const current = findObservationById(ctx.db, id);
-        if (current === null) {
-          notFound('Observacion no encontrada en esta boveda.');
-        }
         const changes = parseOrThrow(correctObservationSchema, rawChanges);
         const defined = pickDefined(changes);
         const subset: Record<string, unknown> = {};
@@ -522,40 +662,67 @@ export function createClinicalService(deps: { clock: Clock }): ClinicalService {
             subset[field] = defined[field];
           }
         }
-        const next: Observation = { ...current };
-        Object.assign(next, subset);
-        assertValueMatchesKind({
-          valueKind: next.valueKind,
-          valueQuantity: next.valueQuantity,
-          valueText: next.valueText,
+        const current = findObservationById(ctx.db, ctx.cipher, id);
+        if (current === null) {
+          auditDeniedThenNotFound(ctx, clock, 'observacion.corregida', 'observation', id);
+        }
+        return inTransaction(ctx.db, () => {
+          const insideTx = findObservationById(ctx.db, ctx.cipher, id);
+          if (insideTx === null || insideTx.version !== current.version) {
+            throw new AppError(
+              'conflict',
+              409,
+              'La observacion fue modificada por otra operacion; reintenta.',
+            );
+          }
+          const next: Observation = { ...insideTx };
+          Object.assign(next, subset);
+          const value = normalizeValueFields({
+            valueKind: next.valueKind,
+            valueQuantity: next.valueQuantity,
+            valueText: next.valueText,
+          });
+          next.valueQuantity = value.valueQuantity;
+          next.valueText = value.valueText;
+          const now = clock.now().toISOString();
+          next.status = 'corregido';
+          next.version = insideTx.version + 1;
+          next.updatedAt = now;
+          insertObservationVersion(ctx.db, ctx.cipher, {
+            id: newId(),
+            observationId: insideTx.id,
+            version: insideTx.version,
+            payload: JSON.stringify(insideTx),
+            changedBy: ctx.accountId,
+            changedAt: now,
+          });
+          const changed = updateObservation(ctx.db, ctx.cipher, next, insideTx.version);
+          if (!changed) {
+            throw new AppError(
+              'conflict',
+              409,
+              'La observacion fue modificada por otra operacion; reintenta.',
+            );
+          }
+          audit(ctx, clock, 'observacion.corregida', 'observation', next.id, {
+            previous_version: insideTx.version,
+            fields: Object.keys(subset),
+          });
+          return viewOf(next);
         });
-        const now = clock.now().toISOString();
-        next.status = 'corregido';
-        next.version = current.version + 1;
-        next.updatedAt = now;
-        insertObservationVersion(ctx.db, {
-          id: newId(),
-          observationId: current.id,
-          version: current.version,
-          payload: JSON.stringify(current),
-          changedBy: ctx.accountId,
-          changedAt: now,
-        });
-        updateObservation(ctx.db, next);
-        audit(ctx, clock, 'observacion.corregida', 'observation', next.id, {
-          previous_version: current.version,
-          fields: Object.keys(subset),
-        });
-        return viewOf(next);
       });
     },
 
     listObservationVersions(ctx, observationId) {
-      const observation = findObservationById(ctx.db, observationId);
+      const observation = findObservationById(ctx.db, ctx.cipher, observationId);
       if (observation === null) {
-        notFound('Observacion no encontrada en esta boveda.');
+        auditDeniedThenNotFound(ctx, clock, 'observacion.versiones', 'observation', observationId);
       }
-      return listObservationVersions(ctx.db, observationId);
+      const versions = listObservationVersions(ctx.db, ctx.cipher, observationId);
+      audit(ctx, clock, 'observacion.versiones', 'observation', observationId, {
+        count: versions.length,
+      });
+      return versions;
     },
 
     listAudit(ctx, rawLimit) {
@@ -563,7 +730,9 @@ export function createClinicalService(deps: { clock: Clock }): ClinicalService {
         rawLimit === undefined
           ? auditLimitSchema.parse(undefined)
           : parseOrThrow(auditLimitSchema, rawLimit);
-      return listAuditEntries(ctx.db, limit);
+      const entries = listAuditEntries(ctx.db, limit);
+      audit(ctx, clock, 'auditoria.listada', 'audit_log', null, { count: entries.length });
+      return entries;
     },
   };
 }

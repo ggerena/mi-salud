@@ -16,9 +16,10 @@ export type ErrorCode =
   | 'unauthorized'
   | 'access_denied'
   | 'auth_flow_invalid'
+  | 'conflict'
   | 'internal_error';
 
-type ErrorStatus = 400 | 401 | 403 | 404 | 413 | 500;
+type ErrorStatus = 400 | 401 | 403 | 404 | 409 | 413 | 500;
 
 export class AppError extends Error {
   readonly code: ErrorCode;

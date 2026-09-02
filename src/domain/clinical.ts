@@ -178,3 +178,27 @@ export function assertValueMatchesKind(input: {
     throw new ClinicalRuleError('Un valor no informado no lleva cantidad ni texto.');
   }
 }
+
+export function normalizeValueFields(input: {
+  valueKind: ValueKind;
+  valueQuantity: number | null;
+  valueText: string | null;
+}): { valueQuantity: number | null; valueText: string | null } {
+  const { valueKind } = input;
+  if (valueKind === 'cantidad') {
+    const valueQuantity = input.valueQuantity;
+    assertValueMatchesKind({ valueKind, valueQuantity, valueText: null });
+    return { valueQuantity, valueText: null };
+  }
+  if (valueKind === 'texto' || valueKind === 'codigo') {
+    const valueText = input.valueText;
+    assertValueMatchesKind({ valueKind, valueQuantity: null, valueText });
+    return { valueQuantity: null, valueText };
+  }
+  if (valueKind === 'booleano') {
+    const valueQuantity = input.valueQuantity;
+    assertValueMatchesKind({ valueKind, valueQuantity, valueText: null });
+    return { valueQuantity, valueText: null };
+  }
+  return { valueQuantity: null, valueText: null };
+}

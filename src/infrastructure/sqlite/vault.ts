@@ -104,6 +104,8 @@ export const VAULT_MIGRATIONS: string[] = [
     occurred_at TEXT NOT NULL,
     detail TEXT
   );`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_observation_versions_observation_version
+   ON observation_versions (observation_id, version);`,
 ];
 
 export function openVault(sqlitePath: string): DatabaseSync {

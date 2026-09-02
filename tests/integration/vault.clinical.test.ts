@@ -61,7 +61,11 @@ function harness() {
     const start = await auth.startLogin();
     const { token } = await auth.completeLogin(start.authorizationUrl);
     const { vault } = auth.acceptConsent(token);
-    const ctx = openVaultContext({ catalogDb: db, accountId: vault.accountId });
+    const ctx = openVaultContext({
+      catalogDb: db,
+      accountId: vault.accountId,
+      masterKey,
+    });
     if (ctx === null) {
       throw new Error('la boveda debia existir tras el consentimiento');
     }
@@ -148,7 +152,7 @@ describe('crud clinico en boveda aislada', () => {
     const ctx = await signUp(personaA);
     const { report } = await cargarVitaminaD(clinical, ctx);
 
-    insertObservationRow(ctx.db, {
+    insertObservationRow(ctx.db, ctx.cipher, {
       id: newId(),
       diagnosticReportId: report.id,
       code: SYNTHETIC_VITAMIN_D_OBSERVATION.code,
@@ -309,7 +313,7 @@ describe('crud clinico en boveda aislada', () => {
       }
     ).v;
     expect(versionAfter).toBe(versionBefore);
-    const ctx2 = openVaultContext({ catalogDb: db, accountId: ctx.accountId });
+    const ctx2 = openVaultContext({ catalogDb: db, accountId: ctx.accountId, masterKey });
     expect(ctx2).not.toBeNull();
     const obsAgain = clinical.getObservation(ctx2 ?? ctx, observation.id);
     expect(obsAgain.valueQuantity).toBe(18);
@@ -322,7 +326,7 @@ describe('crud clinico en boveda aislada', () => {
     const { observation } = await cargarVitaminaD(clinical, ctx);
     clinical.confirmObservation(ctx, observation.id);
 
-    const entries = clinical.listAudit(ctx, 50);
+    const entries = clinical.listAudit(ctx, 50).filter((e) => e.action !== 'auditoria.listada');
     const actions = entries.map((e) => e.action);
     expect(actions).toContain('perfil.creado');
     expect(actions).toContain('proveedor.creado');
@@ -336,9 +340,9 @@ describe('crud clinico en boveda aislada', () => {
       expect(entry.outcome).toBe('permitido');
       if (entry.detail !== null) {
         const detail = entry.detail;
-        expect(detail).not.toContain('18');
         expect(detail).not.toContain('ng/mL');
         expect(detail).not.toContain('vitamina');
+        expect(detail).not.toContain('30 - 100');
       }
     }
   });

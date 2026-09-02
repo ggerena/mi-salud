@@ -632,6 +632,28 @@ Esquema SQL por bóveda y CRUD clínico mínimo, sin motor de seguimiento. Commi
 
 **Pendiente inmediato:** revisión del diff por un agente distinto (quien implementó no se revisa a sí mismo).
 
+## Registro F2-A — fixes de revisión adversarial (GLM-5.3-Flash, 2026-09-02)
+
+Revisión adversarial del diff F2-A (`14e677b` vs `493b902`) encontró 2 hallazgos altos y 4 medios. Se corrigen exactamente los altos y medios; los bajos quedan fuera de alcance por decisión de Gery. Informe: `~/.buzz/RESEARCH/REVISION_ADVERSARIAL_MI_SALUD_F2A.md`.
+
+**Fixes aplicados:**
+
+1. **Cifrado en reposo de campos clínicos sensibles (alto).** Nuevo `src/infrastructure/crypto/fields.ts`: `createFieldCipher` con AES-256-GCM por campo, formato `enc1:<nonce>:<ct>:<tag>`, AAD `v1|vault|<vaultId>|<scope>|<id>|<field>`. La clave de datos se desenvuelve de la columna `wrapped` existente (AAD `v1|vault|<id>|data-key`). Cifran: `display_name`, unidad y rango originales/normalizados, `value_quantity` (vía `encNum`/`decNum`), payload de snapshots, notas y observaciones de documentos. En claro a propósito (metadatos mínimos para ordenar/consultar): `value_kind`, `status`, `flag_original`, tipos de valores del informe y `scheduled_at`. Toda lectura/escritura del repositorio clínico pasa por el cifrador; no queda texto clínico en el archivo SQLite ni en logs.
+2. **Corrección atómica (medio).** `correctObservation` ahora corre en transacción (`BEGIN IMMEDIATE`) con bloqueo optimista: `updateObservation` filtra `WHERE id = ? AND version = ?` y devuelve filas afectadas; si otra escritura ganó la carrera, se aborta con error `conflict` (409, nuevo código en `src/shared/errors.ts`). Índice único `idx_observation_versions_observation_version(observation_id, version)` en migración de bóveda versión 10 impide snapshots duplicados.
+3. **Cambio de `valueKind` limpia valores incompatibles (medio).** `normalizeValueFields` en `src/domain/clinical.ts`: al agregar o corregir, los campos de valor que no corresponden al nuevo kind se ponen en `null`.
+4. **Fechas de calendario reales (medio).** La validación ya no acepta `2026-02-31` ni `9999-99-99`: verificación por ida y vuelta `Date.UTC` más validación manual de la parte horaria y rechazo de fecha de nacimiento futura.
+5. **Fugas de conexión de bóveda (medio).** `openVaultContext` mantiene una caché por vaultId y reabre la conexión si quedó cerrada; `closeVaultContext(vaultId)` disponible para liberar. 200 aperturas seguidas reutilizan el mismo handle; tras un cierre externo se recupera.
+6. **Auditoría de lecturas y denegaciones IDOR (medio).** `getObservation`, `listObservations` y `confirmObservation` registran `observacion.leida`/`observaciones.listadas`/denegaciones con `detail` solo de IDs; las denegaciones responden `not_found` tras auditar (sin revelar existencia).
+
+**Archivos creados:** `src/infrastructure/crypto/fields.ts`, `tests/integration/vault.security.test.ts`.
+**Archivos modificados:** `src/application/clinical.ts`, `src/domain/clinical.ts`, `src/infrastructure/crypto/index.ts`, `src/infrastructure/sqlite/clinical.ts`, `src/infrastructure/sqlite/vault.ts` (migración v10), `src/shared/errors.ts`, `tests/integration/vault.clinical.test.ts` (aserción de auditoría ajustada: un UUID puede contener los dígitos del valor; se verifica ausencia de unidades/rango).
+
+**Pruebas ejecutadas (locales, Node 24.18.0):** `npm run lint` OK; `npm run typecheck` OK; `npm test` 47/47 (8 nuevos en `vault.security.test.ts`: escaneo de texto en claro en sqlite/wal, índice único de versiones, update obsoleto no-op, exclusión mutua de escritura, limpieza por cambio de kind, fechas imposibles, reutilización/recuperación de conexiones, auditoría sin filtración); `npm run test:smoke` 2/2 (incluye build); gitleaks sin fugas; `npm audit` 0 vulnerabilidades altas. `check:licenses` falla por el propio paquete raíz `UNLICENSED` — preexistente en `main`, sin relación con este cambio.
+
+**NO PROBADO:** CI del push a `main`. Extracción real (no existe). Endpoints web (no construidos). Rendimiento del descifrado campo a campo con volúmenes grandes.
+
+**Bloqueos:** ninguno.
+
 ## 14. Siguiente subencargo (para Codex)
 
 Un solo escritor. Rama `main`. Tras pruebas verdes: commit y push a `main`. Sin deploy. Sin merge de PRs. Sin datos reales. Sin llamar a Google. Quien implemente no se revisa a si mismo.
