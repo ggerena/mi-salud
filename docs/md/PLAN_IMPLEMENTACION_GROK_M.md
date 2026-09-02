@@ -67,8 +67,8 @@ Si el MVP completo no cabe responsablemente en una sola ejecución, cerrar una f
 
 ### 3.3 Git y publicación
 
-- Trabajar sólo en `feat/initial-mvp`; nunca hacer push directo a `main`, `master` o `develop`.
-- Crear o actualizar un único PR borrador hacia `main` y respaldar avances comprobables allí.
+- **Excepción autorizada por Gery (2026-09-02, solo este MVP):** trabajar en `main` y, al cerrar cada fase validada con pruebas, hacer commit y push directo a `main`. No desplegar. El respaldo previo quedó en `backup/mvp-c9a32de` y el tag `backup/mvp-feat-initial-mvp-c9a32de`.
+- Fuera de esta excepción, no hacer push directo a `main`, `master` o `develop`.
 - Antes de cada commit revisar diff, destino y archivos incluidos.
 - No hacer merge, no activar auto-merge y no reescribir historia compartida.
 - No firmar ni identificar commits, comentarios o PR como producidos por un modelo.
@@ -548,6 +548,7 @@ No responder sólo con un plan: el pedido autoriza implementación. No afirmar t
 | 2026-09-02 | Coordinación | Gery pidió agentes más chicos. Andamiaje Fase 0 asignado a GLM-5.3-Flash (un solo escritor). Grok-M retiene OIDC, cifrado, aislamiento, clínica, revisión de seguridad. |
 | 2026-09-02 | Fase 0 — andamiaje (GLM-5.3-Flash) | Ver sección "Registro Fase 0 (GLM-5.3-Flash)" abajo. |
 | 2026-09-02 | Revisión Grok-M de `362da4e` | CI rojo: lint Biome y Gitleaks `generic-api-key` en fixture sintético. `.gitignore` `objects/` ocultaba `src/infrastructure/objects/`. Compose podía heredar `HOST=127.0.0.1` del `.env` y dejar el contenedor inalcanzable. |
+| 2026-09-02 | Cambio de rama (Gery) | Respaldo `backup/mvp-c9a32de` + tag `backup/mvp-feat-initial-mvp-c9a32de`. Fases 0-1 validadas pasan a `main` con push directo. CI de push apunta a `main`. Sin deploy. |
 
 ## Registro Fase 0 (GLM-5.3-Flash)
 
