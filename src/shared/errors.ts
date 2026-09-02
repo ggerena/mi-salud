@@ -17,7 +17,8 @@ export type ErrorCode =
   | 'access_denied'
   | 'auth_flow_invalid'
   | 'conflict'
-  | 'internal_error';
+  | 'internal_error'
+  | 'vault_integrity';
 
 type ErrorStatus = 400 | 401 | 403 | 404 | 409 | 413 | 500;
 

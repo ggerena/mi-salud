@@ -1,3 +1,4 @@
+import { createCipheriv, randomBytes } from 'node:crypto';
 import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -10,6 +11,12 @@ import {
   openVaultContext,
   type VaultContext,
 } from '../../src/application/clinical.ts';
+import { unwrapDataKey } from '../../src/infrastructure/crypto/aead.ts';
+import {
+  createFieldCipher,
+  FIELD_CIPHER_VERSION,
+  LEGACY_FIELD_CIPHER_VERSION,
+} from '../../src/infrastructure/crypto/fields.ts';
 import { FakeOidcProvider } from '../../src/infrastructure/oidc/fake.ts';
 import {
   findVaultByAccount,
@@ -317,5 +324,304 @@ describe('auditoria de lecturas y denegaciones', () => {
         }
       }
     }
+  });
+});
+
+function enc1ConClave(
+  vaultId: string,
+  id: string,
+  campo: string,
+  valor: string,
+  clave: Buffer,
+): string {
+  const nonce = randomBytes(12);
+  const cipher = createCipheriv('aes-256-gcm', clave, nonce);
+  cipher.setAAD(Buffer.from(`v1|vault|${vaultId}|observations|${id}|${campo}`, 'utf8'));
+  const ct = Buffer.concat([cipher.update(valor, 'utf8'), cipher.final()]);
+  return `${LEGACY_FIELD_CIPHER_VERSION}:${nonce.toString('base64')}:${ct.toString('base64')}:${cipher.getAuthTag().toString('base64')}`;
+}
+
+describe('separacion real de claves por boveda', () => {
+  it('solo la clave real de cada boveda descifra sus campos', async () => {
+    const { db, signUp, cargarVitaminaD } = harness();
+    const ctxA = await signUp(personaA);
+    await cargarVitaminaD(ctxA);
+    insertAllowlist(db, personaB.iss, personaB.sub, new SystemClock());
+    const ctxB = await signUp(personaB);
+    await cargarVitaminaD(ctxB);
+    closeVaultContext(ctxA.vaultId);
+    closeVaultContext(ctxB.vaultId);
+
+    const vaultA = findVaultByAccount(db, ctxA.accountId);
+    const vaultB = findVaultByAccount(db, ctxB.accountId);
+    if (vaultA === null || vaultB === null) {
+      throw new Error('las bovedas debian existir');
+    }
+
+    const rawA = new DatabaseSync(vaultA.sqlitePath);
+    const filaA = rawA.prepare('SELECT id, original_name FROM observations LIMIT 1').get() as {
+      id: string;
+      original_name: string | null;
+    };
+    rawA.close();
+    expect(filaA.original_name?.startsWith(`${FIELD_CIPHER_VERSION}:`)).toBe(true);
+    expect(filaA.original_name).not.toContain(SYNTHETIC_VITAMIN_D_OBSERVATION.originalName);
+
+    const claveRealA = unwrapDataKey({
+      masterKey,
+      wrapped: vaultA.wrapped,
+      aad: Buffer.from(`v1|vault|${vaultA.id}|data-key`, 'utf8'),
+    });
+    const claveRealB = unwrapDataKey({
+      masterKey,
+      wrapped: vaultB.wrapped,
+      aad: Buffer.from(`v1|vault|${vaultB.id}|data-key`, 'utf8'),
+    });
+
+    const cifradorA = createFieldCipher({ vaultId: vaultA.id, dataKey: claveRealA });
+    expect(cifradorA.dec('observations', filaA.id, 'original_name', filaA.original_name)).toBe(
+      SYNTHETIC_VITAMIN_D_OBSERVATION.originalName,
+    );
+
+    const claveCero = createFieldCipher({ vaultId: vaultA.id, dataKey: Buffer.alloc(32, 0) });
+    expect(() =>
+      claveCero.dec('observations', filaA.id, 'original_name', filaA.original_name ?? ''),
+    ).toThrow(/No se pudo descifrar/);
+
+    const claveAzar = createFieldCipher({ vaultId: vaultA.id, dataKey: randomBytes(32) });
+    expect(() =>
+      claveAzar.dec('observations', filaA.id, 'original_name', filaA.original_name ?? ''),
+    ).toThrow(/No se pudo descifrar/);
+
+    const cifradorB = createFieldCipher({ vaultId: vaultB.id, dataKey: claveRealB });
+    expect(() =>
+      cifradorB.dec('observations', filaA.id, 'original_name', filaA.original_name ?? ''),
+    ).toThrow(/No se pudo descifrar/);
+  });
+});
+
+describe('migracion de datos previos al cifrado enc2', () => {
+  it('convierte texto plano historico a enc2 y no se repite al reabrir', async () => {
+    const { db, clinical, signUp, cargarVitaminaD } = harness();
+    const ctx = await signUp(personaA);
+    const observation = await cargarVitaminaD(ctx);
+
+    ctx.db.exec('DELETE FROM field_cipher_migrations');
+    ctx.db
+      .prepare('UPDATE observations SET original_name = ?, value_quantity = ? WHERE id = ?')
+      .run('Examen legado en texto plano', 42, observation.id);
+    closeVaultContext(ctx.vaultId);
+
+    const ctx2 = openVaultContext({ catalogDb: db, accountId: ctx.accountId, masterKey });
+    expect(ctx2).not.toBeNull();
+    const leida = clinical.getObservation(ctx2 ?? ctx, observation.id);
+    expect(leida.originalName).toBe('Examen legado en texto plano');
+    expect(leida.valueQuantity).toBe(42);
+
+    const contar = (conn: VaultContext | null, sql: string): number => {
+      if (conn === null) {
+        throw new Error('la boveda debia estar abierta');
+      }
+      return (conn.db.prepare(sql).get() as { n: number }).n;
+    };
+    const fila = ctx2?.db
+      .prepare('SELECT original_name, value_quantity FROM observations WHERE id = ?')
+      .get(observation.id) as { original_name: string | null; value_quantity: string | null };
+    expect(fila.original_name?.startsWith(`${FIELD_CIPHER_VERSION}:`)).toBe(true);
+    expect(fila.original_name).not.toContain('Examen legado');
+    expect(fila.value_quantity?.startsWith(`${FIELD_CIPHER_VERSION}:`)).toBe(true);
+    expect(contar(ctx2, 'SELECT COUNT(*) AS n FROM field_cipher_migrations')).toBe(1);
+    expect(
+      contar(ctx2, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'boveda.cifrado-migrada'"),
+    ).toBe(2);
+
+    closeVaultContext(ctx2?.vaultId ?? '');
+    const ctx3 = openVaultContext({ catalogDb: db, accountId: ctx.accountId, masterKey });
+    expect(ctx3).not.toBeNull();
+    expect(clinical.getObservation(ctx3 ?? ctx, observation.id).originalName).toBe(
+      'Examen legado en texto plano',
+    );
+    expect(contar(ctx3, 'SELECT COUNT(*) AS n FROM field_cipher_migrations')).toBe(1);
+    expect(
+      contar(ctx3, "SELECT COUNT(*) AS n FROM audit_log WHERE action = 'boveda.cifrado-migrada'"),
+    ).toBe(2);
+    closeVaultContext(ctx3?.vaultId ?? '');
+  });
+
+  it('rescata los enc1 cifrados con la clave cero del bug', async () => {
+    const { db, clinical, signUp, cargarVitaminaD } = harness();
+    const ctx = await signUp(personaA);
+    const observation = await cargarVitaminaD(ctx);
+
+    const legado = enc1ConClave(
+      ctx.vaultId,
+      observation.id,
+      'original_name',
+      'Hemoglobina glicada',
+      Buffer.alloc(32, 0),
+    );
+    ctx.db.exec('DELETE FROM field_cipher_migrations');
+    ctx.db
+      .prepare('UPDATE observations SET original_name = ? WHERE id = ?')
+      .run(legado, observation.id);
+    closeVaultContext(ctx.vaultId);
+
+    const ctx2 = openVaultContext({ catalogDb: db, accountId: ctx.accountId, masterKey });
+    expect(ctx2).not.toBeNull();
+    expect(clinical.getObservation(ctx2 ?? ctx, observation.id).originalName).toBe(
+      'Hemoglobina glicada',
+    );
+
+    const fila = ctx2?.db
+      .prepare('SELECT original_name FROM observations WHERE id = ?')
+      .get(observation.id) as { original_name: string | null };
+    expect(fila.original_name?.startsWith(`${FIELD_CIPHER_VERSION}:`)).toBe(true);
+    expect(fila.original_name).not.toBe(legado);
+    closeVaultContext(ctx2?.vaultId ?? '');
+  });
+
+  it('una fila corrupta aborta la migracion completa, revierte y deja auditoria', async () => {
+    const { db, clinical, signUp, cargarVitaminaD } = harness();
+    const ctx = await signUp(personaA);
+    const observation = await cargarVitaminaD(ctx);
+    const segunda = clinical.addObservation(ctx, {
+      ...SYNTHETIC_VITAMIN_D_OBSERVATION,
+      originalName: 'Segundo examen',
+      diagnosticReportId: observation.diagnosticReportId,
+    });
+
+    const corrupto = enc1ConClave(
+      ctx.vaultId,
+      segunda.id,
+      'original_name',
+      'dato cifrado con clave desconocida',
+      randomBytes(32),
+    );
+    ctx.db.exec('DELETE FROM field_cipher_migrations');
+    ctx.db
+      .prepare('UPDATE observations SET original_name = ? WHERE id = ?')
+      .run('Examen legado en texto plano', observation.id);
+    ctx.db
+      .prepare('UPDATE observations SET original_name = ? WHERE id = ?')
+      .run(corrupto, segunda.id);
+    closeVaultContext(ctx.vaultId);
+
+    let codigo: string | null = null;
+    try {
+      openVaultContext({ catalogDb: db, accountId: ctx.accountId, masterKey });
+    } catch (err) {
+      expect(err).toBeInstanceOf(AppError);
+      codigo = (err as AppError).code;
+    }
+    expect(codigo).toBe('vault_integrity');
+
+    const vault = findVaultByAccount(db, ctx.accountId);
+    const raw = new DatabaseSync(vault?.sqlitePath ?? '');
+    const primera = raw
+      .prepare('SELECT original_name FROM observations WHERE id = ?')
+      .get(observation.id) as { original_name: string | null };
+    const marcador = raw.prepare('SELECT COUNT(*) AS n FROM field_cipher_migrations').get() as {
+      n: number;
+    };
+    const corruptas = raw
+      .prepare("SELECT detail FROM audit_log WHERE action = 'boveda.cifrado-corrupto'")
+      .all() as Array<{ detail: string | null }>;
+    raw.close();
+
+    expect(primera.original_name).toBe('Examen legado en texto plano');
+    expect(marcador.n).toBe(0);
+    expect(corruptas).toHaveLength(1);
+    const detalle = JSON.parse(corruptas[0]?.detail ?? '{}') as {
+      tabla: string;
+      columna: string;
+      fila: string;
+    };
+    expect(detalle.tabla).toBe('observations');
+    expect(detalle.columna).toBe('original_name');
+    expect(detalle.fila).toBe(segunda.id);
+  });
+
+  it('despues de migrar no existe respaldo permanente a la clave cero', async () => {
+    const { db, clinical, signUp, cargarVitaminaD } = harness();
+    const ctx = await signUp(personaA);
+    const observation = await cargarVitaminaD(ctx);
+
+    const legado = enc1ConClave(
+      ctx.vaultId,
+      observation.id,
+      'original_name',
+      SYNTHETIC_VITAMIN_D_OBSERVATION.originalName,
+      Buffer.alloc(32, 0),
+    );
+    ctx.db
+      .prepare('UPDATE observations SET original_name = ? WHERE id = ?')
+      .run(legado, observation.id);
+    closeVaultContext(ctx.vaultId);
+
+    const ctx2 = openVaultContext({ catalogDb: db, accountId: ctx.accountId, masterKey });
+    expect(ctx2).not.toBeNull();
+    let codigo: string | null = null;
+    try {
+      clinical.getObservation(ctx2 ?? ctx, observation.id);
+    } catch (err) {
+      expect(err).toBeInstanceOf(AppError);
+      codigo = (err as AppError).code;
+    }
+    expect(codigo).toBe('vault_integrity');
+    expect(() => clinical.listObservations(ctx2 ?? ctx)).toThrow(AppError);
+    closeVaultContext(ctx2?.vaultId ?? '');
+  });
+});
+
+describe('validacion de zonas horarias ISO', () => {
+  it('rechaza offsets imposibles como +30:99 y acepta zonas reales', async () => {
+    const { clinical, signUp, cargarVitaminaD } = harness();
+    const ctx = await signUp(personaA);
+    const observation = await cargarVitaminaD(ctx);
+    const reportId = observation.diagnosticReportId;
+
+    const expectBadRequest = (fn: () => unknown) => {
+      try {
+        fn();
+        expect.unreachable('debia rechazar la entrada');
+      } catch (err) {
+        expect(err).toBeInstanceOf(AppError);
+        expect((err as AppError).code).toBe('bad_request');
+      }
+    };
+
+    expectBadRequest(() =>
+      clinical.addObservation(ctx, {
+        ...SYNTHETIC_VITAMIN_D_OBSERVATION,
+        diagnosticReportId: reportId,
+        effectiveAt: '2026-07-08T10:00:00+30:99',
+      }),
+    );
+    expectBadRequest(() =>
+      clinical.addObservation(ctx, {
+        ...SYNTHETIC_VITAMIN_D_OBSERVATION,
+        diagnosticReportId: reportId,
+        reportedAt: '2026-07-08T10:00:00+14:60',
+      }),
+    );
+    expectBadRequest(() =>
+      clinical.upsertProfile(ctx, {
+        ...SYNTHETIC_PERSON,
+        birthDate: '1990-02-28T00:00:00+00:60',
+      }),
+    );
+    expectBadRequest(() =>
+      clinical.createAppointment(ctx, {
+        title: 'Zona rota',
+        scheduledAt: '2026-07-15T09:00:00+30:99',
+      }),
+    );
+
+    const valida = clinical.addObservation(ctx, {
+      ...SYNTHETIC_VITAMIN_D_OBSERVATION,
+      diagnosticReportId: reportId,
+      effectiveAt: '2026-07-08T10:00:00-03:00',
+    });
+    expect(valida.effectiveAt).toBe('2026-07-08T10:00:00-03:00');
   });
 });

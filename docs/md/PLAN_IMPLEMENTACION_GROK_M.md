@@ -654,6 +654,26 @@ Revisión adversarial del diff F2-A (`14e677b` vs `493b902`) encontró 2 hallazg
 
 **Bloqueos:** ninguno.
 
+## Registro F2-A — fixes de revision adversarial ronda 2 (GLM-5.3, 2026-09-02)
+
+Segunda revision adversarial (diff `5ea09bf` vs `c6ca317`) encontro 1 hallazgo alto y 3 medios; los bajos quedan fuera de alcance por decision de Gery. Informe: `~/.buzz/RESEARCH/REVISION_ADVERSARIAL_MI_SALUD_F2A_RONDA2.md`.
+
+**Fixes aplicados:**
+
+1. **Clave de cifrado compartida y luego borrada (alto).** `createFieldCipher` valida 32 bytes y posee una copia privada de la clave (`Buffer.from`); `openVaultContext` borra el buffer original (`fill(0)`) despues de crear el cifrador. `destroy()` borra la copia y cierra el cifrador (fail-closed, idempotente); se invoca al cerrar el contexto y antes de reemplazar una entrada de cache huerfana. El bug anterior dejaba la clave en cero: todo `enc1` era descifrable por cualquiera.
+2. **Versionado y migracion transaccional de campos (medio).** Nuevo formato `enc2` para toda escritura; `dec` solo acepta `enc2` y ante lo inesperado falla con el error nuevo `vault_integrity` (500) nombrando scope/id/campo. La migracion de esquema v10 crea la tabla ledger `field_cipher_migrations`; `runFieldCipherMigration` (nuevo `src/infrastructure/sqlite/reencrypt.ts`) convierte en una transaccion `BEGIN IMMEDIATE` el texto plano historico y los `enc1` de la epoca de la clave cero a `enc2`, inserta marcador y audita `boveda.cifrado-migrada`. Ante corrupcion: `ROLLBACK` completo, auditoria `boveda.cifrado-corrupto` (outcome `denegado`, detail `{tabla, columna, fila}`) y relanzamiento; `openVaultContext` no deja cache ni conexion abierta. Sin respaldo permanente a la clave cero: tras migrar, leer un `enc1` lanza `vault_integrity`.
+3. **Zonas horarias ISO invalidas (medio).** `hasValidTimePart` rechaza offsets con horas > 23 o minutos > 59 (p. ej. `+30:99`); `clinicalDate` agrega comprobacion final de que `Date.parse` no devuelva NaN.
+4. **Pruebas con claves equivocadas (medio).** Nueve tests unitarios del cifrador (copia propia de la clave, clave cero/equivocada/de otra boveda, amarra del AAD, manipulacion de ct/tag, destroy, rescate de `enc1`, numericos) y tests de integracion: separacion real de claves entre bovedas leyendo sqlite crudo, rescate de `enc1` con clave cero, aborto atomico con fila corrupta, no repeticion de la migracion al reabrir, y validacion de offsets en las cuatro fechas de entrada.
+
+**Archivos creados:** `src/infrastructure/sqlite/reencrypt.ts`.
+**Archivos modificados:** `src/application/clinical.ts` (migracion en apertura, destroy en cierre, validacion de offsets), `src/infrastructure/crypto/fields.ts` (reescrito: copia de clave, destroy, enc2, `decryptLegacyField`), `src/infrastructure/crypto/index.ts`, `src/infrastructure/sqlite/vault.ts` (migracion v10), `src/shared/errors.ts` (`vault_integrity`), `tests/unit/crypto.test.ts`, `tests/integration/vault.security.test.ts`.
+
+**Pruebas ejecutadas (locales, Node 24.18.0):** `npm run lint` OK; `npm run typecheck` OK; `npm test` 62/62 (15 nuevos); `npm run test:smoke` 2/2 (incluye build); gitleaks sin fugas; `npm audit` 0 vulnerabilidades.
+
+**NO PROBADO:** CI del push a `main`. Extraccion real (no existe). Endpoints web (no construidos). Rendimiento del descifrado campo a campo con volumenes grandes. Migracion en caliente de bovedas reales pre-existentes (no existen datos reales).
+
+**Bloqueos:** ninguno. Pendiente: revision del diff por un agente distinto al implementador.
+
 ## 14. Siguiente subencargo (para Codex)
 
 Un solo escritor. Rama `main`. Tras pruebas verdes: commit y push a `main`. Sin deploy. Sin merge de PRs. Sin datos reales. Sin llamar a Google. Quien implemente no se revisa a si mismo.

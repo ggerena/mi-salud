@@ -47,6 +47,7 @@ import {
   updateObservation,
   updateProfile,
 } from '../infrastructure/sqlite/clinical.ts';
+import { runFieldCipherMigration } from '../infrastructure/sqlite/reencrypt.ts';
 import { openVault } from '../infrastructure/sqlite/vault.ts';
 import type { Clock } from '../shared/clock.ts';
 import { AppError } from '../shared/errors.ts';
@@ -86,8 +87,21 @@ export function openVaultContext(deps: {
     aad: Buffer.from(`v1|vault|${vault.id}|data-key`, 'utf8'),
   });
   const db = openVault(vault.sqlitePath);
+  // El cifrador copia la clave, por lo que borrar el buffer original aqui
+  // ya no invalida el cifrado en caliente (bug de la clave cero).
   const cipher = createFieldCipher({ vaultId: vault.id, dataKey });
   dataKey.fill(0);
+  try {
+    runFieldCipherMigration(db, { vaultId: vault.id, accountId: deps.accountId, cipher });
+  } catch (err) {
+    cipher.destroy();
+    db.close();
+    throw err;
+  }
+  const stale = vaultCache.get(vault.id);
+  if (stale !== undefined) {
+    stale.cipher.destroy();
+  }
   vaultCache.set(vault.id, { path: vault.sqlitePath, db, cipher });
   return { vaultId: vault.id, accountId: deps.accountId, db, cipher };
 }
@@ -95,6 +109,7 @@ export function openVaultContext(deps: {
 export function closeVaultContext(vaultId: string): void {
   const cached = vaultCache.get(vaultId);
   if (cached !== undefined) {
+    cached.cipher.destroy();
     if (cached.db.isOpen) {
       cached.db.close();
     }
@@ -141,6 +156,12 @@ function hasValidTimePart(value: string): boolean {
       return false;
     }
   }
+  // La zona horaria tambien es parte de la hora: un offset imposible como
+  // +30:99 debe rechazarse en la entrada, no colarse hasta el almacen.
+  const offset = value.match(/[+-](\d{2}):(\d{2})$/);
+  if (offset !== null && (Number(offset[1]) > 23 || Number(offset[2]) > 59)) {
+    return false;
+  }
   return true;
 }
 
@@ -148,7 +169,8 @@ const clinicalDate = z
   .string()
   .regex(ISO_CLINICAL_DATE, 'Fecha ISO 8601 invalida (YYYY-MM-DD o con hora y zona).')
   .refine(isRealCalendarDate, 'La fecha no existe en el calendario (dia o mes imposibles).')
-  .refine(hasValidTimePart, 'La hora indicada no existe.');
+  .refine(hasValidTimePart, 'La hora o la zona horaria indicada no existe.')
+  .refine((value) => !Number.isNaN(Date.parse(value)), 'La fecha no es interpretable.');
 
 const scheduledAtSchema = z.iso.datetime({
   offset: true,
