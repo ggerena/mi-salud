@@ -208,7 +208,6 @@ export function runFieldCipherMigration(
       FIELD_CIPHER_MIGRATION_VERSION,
       new Date().toISOString(),
     );
-    db.exec('COMMIT');
     migrationAudit(db, {
       accountId: input.accountId,
       vaultId: input.vaultId,
@@ -216,6 +215,7 @@ export function runFieldCipherMigration(
       outcome: 'permitido',
       detail: { recifrados: reencrypted, cifrados: encrypted },
     });
+    db.exec('COMMIT');
   } catch (err) {
     try {
       db.exec('ROLLBACK');
