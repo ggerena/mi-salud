@@ -539,7 +539,7 @@ No responder sólo con un plan: el pedido autoriza implementación. No afirmar t
 
 ## 13. Registro de ejecución (Grok-M)
 
-**Estado actual:** parcial — Fases 0 y 1 en `feat/initial-mvp`. MVP completo sigue pendiente.
+**Estado actual:** parcial — Fases 0 y 1 en `main` (`f7670f8`). Grok-M no abre Fase 2: cuota insuficiente para cerrarla. Codex coordina el siguiente subencargo, un agente a la vez.
 
 | Fecha (Santiago) | Paso | Resultado |
 | --- | --- | --- |
@@ -549,6 +549,7 @@ No responder sólo con un plan: el pedido autoriza implementación. No afirmar t
 | 2026-09-02 | Fase 0 — andamiaje (GLM-5.3-Flash) | Ver sección "Registro Fase 0 (GLM-5.3-Flash)" abajo. |
 | 2026-09-02 | Revisión Grok-M de `362da4e` | CI rojo: lint Biome y Gitleaks `generic-api-key` en fixture sintético. `.gitignore` `objects/` ocultaba `src/infrastructure/objects/`. Compose podía heredar `HOST=127.0.0.1` del `.env` y dejar el contenedor inalcanzable. |
 | 2026-09-02 | Cambio de rama (Gery) | Respaldo `backup/mvp-c9a32de` + tag `backup/mvp-feat-initial-mvp-c9a32de`. Fases 0-1 validadas pasan a `main` con push directo. CI de push apunta a `main`. Sin deploy. |
+| 2026-09-02 | Pausa por cuota | Grok-M no abre Fase 2. Handoff en seccion 14 (F2-A). Codex coordina, un agente a la vez. |
 
 ## Registro Fase 0 (GLM-5.3-Flash)
 
@@ -597,3 +598,27 @@ Identidad y bovedas, sin clinica.
 - Paginas: inicio, login, consentimiento, cuenta.
 
 **NO PROBADO:** intercambio real contra accounts.google.com (requiere cliente OIDC de Gery). Esquema SQL clinico de la boveda (Fase 2).
+
+## 14. Siguiente subencargo (para Codex)
+
+Un solo escritor. Rama `main`. Tras pruebas verdes: commit y push a `main`. Sin deploy. Sin merge de PRs. Sin datos reales. Sin llamar a Google. Quien implemente no se revisa a si mismo.
+
+**Subencargo F2-A — esquema y repositorios de la boveda (sin motor de seguimiento)**
+
+Objetivo: migraciones SQL por boveda y casos de uso CRUD minimos para perfil, profesional/organizacion, citas, documentos (metadatos), informes, observaciones y auditoria/procedencia. Todavia no OCR, no URLs, no “¿me toca?”.
+
+Archivos permitidos: `src/domain/**`, `src/application/**`, `src/infrastructure/sqlite/**`, `src/interfaces/web/**`, `tests/unit/**`, `tests/integration/**`, `tests/fixtures/**`, `docs/md/PLAN_IMPLEMENTACION_GROK_M.md`.
+
+Obligatorio:
+- SQLite de boveda en la ruta ya guardada en el catalogo (`createVault`); WAL, FK, migraciones transaccionales.
+- Observaciones con estados `extraido` | `requiere_confirmacion` | `confirmado` | `corregido`; un extraido no se muestra como confirmado.
+- Conservar nombre, unidad, rango y marca originales; fechas de toma vs informe separadas.
+- Fixtures solo sinteticos (vitamina D de la especificacion).
+- Casos de uso; handlers no hablan SQL.
+- Tests: aislamiento entre dos bovedas (IDOR), estado no confirmado, no conversion de unidades.
+
+Prohibido: inferir periodicidad; rangos genericos; FHIR/MCP/OAuth de clientes; ingestión de archivos; relajar tests; atribucion a IA.
+
+Verificar: `npm run lint`, `npm run typecheck`, `npm test`, `npm run test:smoke`.
+
+**Luego (no en F2-A):** F2-B motor de seguimiento explicable (`sin_evidencia`, indicacion revocada, vitamina D) — lo define quien coordine la semantica clinica, no un agente mecanico.
