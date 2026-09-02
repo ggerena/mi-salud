@@ -1,0 +1,48 @@
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+secrets/
+
+# Personal and clinical data
+data/
+objects/
+uploads/
+imports/
+exports/
+backups/
+logs/
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.dump
+*.bak
+
+# Generated extraction artifacts
+ocr/
+thumbnails/
+derived/
+quarantine/
+
+# Dependencies, builds and local tooling
+node_modules/
+dist/
+build/
+coverage/
+.cache/
+.wrangler/
+tmp/
+temp/
+
+# Operating systems and editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
