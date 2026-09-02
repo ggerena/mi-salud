@@ -273,7 +273,7 @@ describe('reutilizacion de conexiones de boveda', () => {
     expect(reabierto === null).toBe(false);
     const mismoHandle = reabierto !== null && reabierto.db === primero.db;
     expect(mismoHandle).toBe(false);
-    expect(reabierto !== null && reabierto.db.isOpen).toBe(true);
+    expect(reabierto?.db.isOpen).toBe(true);
     closeVaultContext(reabierto?.vaultId ?? '');
   });
 });
@@ -305,13 +305,15 @@ describe('auditoria de lecturas y denegaciones', () => {
     for (const entry of [...auditoriaA, ...auditoriaB]) {
       expect(entry.detail ?? '').not.toContain('ng/mL');
       expect(entry.detail ?? '').not.toContain('vitamina');
-      expect(entry.detail ?? '').not.toContain(SYNTHETIC_VITAMIN_D_OBSERVATION.referenceRangeOriginal);
+      expect(entry.detail ?? '').not.toContain(
+        SYNTHETIC_VITAMIN_D_OBSERVATION.referenceRangeOriginal,
+      );
       if (entry.detail !== null) {
         const parsed = JSON.parse(entry.detail) as Record<string, unknown>;
         for (const value of Object.values(parsed)) {
-          expect(typeof value === 'string' && /[a-zA-Z]{4,}/.test(value) && value.includes(' ')).toBe(
-            false,
-          );
+          expect(
+            typeof value === 'string' && /[a-zA-Z]{4,}/.test(value) && value.includes(' '),
+          ).toBe(false);
         }
       }
     }
