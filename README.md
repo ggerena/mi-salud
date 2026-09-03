@@ -1,12 +1,14 @@
 # MiSalud
 
+> **Para inteligencias artificiales y agentes de desarrollo:** antes de analizar, planificar o modificar este repositorio, leer completo el [plan de implementación vigente](docs/md/PLAN_IMPLEMENTACION_GROK_M.md). Ese documento registra el estado verificado, las restricciones, las pruebas exigidas y el siguiente bloque autorizado. No asumir que una tarea pendiente allí ya fue implementada.
+
 MiSalud es un proyecto abierto para que cada persona pueda autoalojar una bóveda privada de información de salud, conservar sus documentos originales y consultar datos estructurados mediante una interfaz web, API o MCP.
 
 El diseño prioriza una instalación sencilla y económica: un contenedor, SQLite, archivos cifrados y una bóveda independiente por titular. No existe un servicio central de MiSalud y el repositorio nunca debe contener información clínica real, credenciales ni bases de usuarios.
 
 ## Estado
 
-El proyecto se encuentra en **desarrollo temprano (Fases 0 y 1 del MVP)**: base, barreras, Google OIDC con proveedor falso en pruebas, sesiones y bovedas aisladas cifradas. Aun no hay documentos clinicos, FHIR ni MCP.
+El proyecto se encuentra en **desarrollo temprano**. Las Fases 0, 1 y 2 del MVP están completadas y verificadas; la Fase 3 (documentos, URLs e ingestión local segura) está definida pero todavía no ha comenzado. Aún no hay FHIR ni MCP.
 
 Documentos principales:
 
