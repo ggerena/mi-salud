@@ -117,6 +117,7 @@ Si no existe una indicación explícita o una regla clínica aprobada y vigente,
 
 - Importadores específicos para clínicas, laboratorios y aseguradoras.
 - Recepción por correo dedicado.
+- Exportación manual de citas a calendarios: desde MCP o el sitio, MiSalud entrega un vínculo propio para que la persona autenticada confirme y descargue un archivo `.ics` o abra el formulario de Google Calendar. No requiere permisos de Calendar ni sincronización automática.
 - Integración SMART on FHIR con prestadores.
 - Recetas, vacunas, alergias, condiciones, medicamentos y dispositivos.
 - Soporte DICOM progresivo: conservación del archivo original y metadatos, seguido por un visor web básico y, sólo si resulta necesario, integración PACS. Debe poder implementarse con bibliotecas abiertas y autoalojables, sin exigir servicios o licencias pagadas.
@@ -523,6 +524,10 @@ Los scopes se combinan con propiedad del recurso, propósito, sensibilidad, dest
 | `revoke_share_link` | revoca una concesión | sí |
 
 Las herramientas que cambian estado deben declararlo, aceptar claves de idempotencia y devolver el recurso resultante más un evento de auditoría.
+
+Como mejora posterior y no prioritaria, `create_appointment` puede devolver además un `calendar_action_url` de MiSalud. Ese vínculo abre una pantalla humana autenticada, muestra un resumen y exige confirmación antes de descargar `.ics` o abrir Google Calendar. El vínculo no contiene datos clínicos ni credenciales; identifica la cita mediante un valor opaco y queda sujeto a propiedad del recurso, expiración y auditoría. La exportación usa por defecto un título genérico como `Cita médica` y no incluye diagnóstico, resultado ni nombre de examen. Cualquier envío de ubicación, profesional o notas a Google debe mostrarse previamente y requerir una decisión explícita de la persona.
+
+Esta exportación manual no necesita scopes de Google Calendar. Una sincronización directa futura sigue exigiendo consentimiento incremental, revocable y separado del inicio de sesión.
 
 ### 12.5 Recursos MCP
 
