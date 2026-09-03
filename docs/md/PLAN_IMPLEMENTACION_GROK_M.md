@@ -539,7 +539,7 @@ No responder sólo con un plan: el pedido autoriza implementación. No afirmar t
 
 ## 13. Registro de ejecución (Grok-M)
 
-**Estado actual:** Fases 0, 1 y subencargo F2-A en `main`. F2-B (motor de seguimiento) no se inicia: lo define quien coordine la semántica clínica. Codex coordina el siguiente subencargo, un agente a la vez.
+**Estado actual:** Fases 0, 1 y 2 (F2-A y F2-B) completadas y validadas en `main` (commit `1e43c7b`). Próximo bloque: Fase 3 (documentos, URLs e ingestión local segura). Coordinación central por Gemini-3.8-flash mediante Buzz, implementador preferente Grok-M con revisiones independientes.
 
 | Fecha (Santiago) | Paso | Resultado |
 | --- | --- | --- |
@@ -551,6 +551,9 @@ No responder sólo con un plan: el pedido autoriza implementación. No afirmar t
 | 2026-09-02 | Cambio de rama (Gery) | Respaldo `backup/mvp-c9a32de` + tag `backup/mvp-feat-initial-mvp-c9a32de`. Fases 0-1 validadas pasan a `main` con push directo. CI de push apunta a `main`. Sin deploy. |
 | 2026-09-02 | Pausa por cuota | Grok-M no abre Fase 2. Handoff en seccion 14 (F2-A). Codex coordina, un agente a la vez. |
 | 2026-09-02 | F2-A — esquema y CRUD de bóveda (GLM-5.3) | Ver sección "Registro F2-A (GLM-5.3)" abajo. Commit y push directo a `main` autorizados por Gery tras verificaciones verdes. |
+| 2026-09-02 | F2-A — fixes adversarial ronda 1 y 2 | Cifrador de campos `enc2`, migración transaccional, integridad y validaciones de hora. Commit `c4f167a` y fix Biome `2f1b6e1`. |
+| 2026-09-02 | F2-B — motor de seguimiento (Grok-L) | Commit `a9fd29c`. Motor de seguimiento explicable, soporte `sin_evidencia`, indicaciones revocadas, cálculo P3M e intervalo sintético vitamina D. |
+| 2026-09-03 | F2-B — corrección adversarial (Grok-L) | Commit `1e43c7b`. Se evita bloqueo prematuro de `usedKeys` por planes borradores/cumplidos. Aprobado por Grok-H tras revisión crítica en solo lectura. CI verde (72/72 tests, 2/2 smoke). |
 
 ## Registro Fase 0 (GLM-5.3-Flash)
 
@@ -674,26 +677,32 @@ Segunda revision adversarial (diff `5ea09bf` vs `c6ca317`) encontro 1 hallazgo a
 
 **Bloqueos:** ninguno. Pendiente: revision del diff por un agente distinto al implementador.
 
-## 14. Siguiente subencargo (para Codex)
+## 14. Registro de Fase 2 (F2-A y F2-B)
 
-Un solo escritor. Rama `main`. Tras pruebas verdes: commit y push a `main`. Sin deploy. Sin merge de PRs. Sin datos reales. Sin llamar a Google. Quien implemente no se revisa a si mismo.
+**Estado:** COMPLETADO en `main` (`1e43c7b`).
+- **F2-A:** Esquema SQL por bóveda y CRUD clínico con cifrado de campos `enc2`, auditoría estricta y aislamiento verificado.
+- **F2-B:** Motor de seguimiento explicable implementado en `src/domain/followup.ts`, manejo riguroso de fechas calendario (P3M), estados `sin_evidencia`, indicaciones revocadas y filtro adecuado de borradores/cumplidos sin ocultar exámenes vigentes.
+- **Verificación:** Tests 72/72 verdes, 2/2 smoke test, revisión adversarial por Grok-H aprobada y CI verde en GitHub Actions.
 
-**F2-A — esquema y repositorios de la bóveda: COMPLETADO (2026-09-02, GLM-5.3).** Ver "Registro F2-A (GLM-5.3)". Pendiente: revisión del diff por un agente distinto al implementador. El subencargo original queda documentado a continuación para la revisión.
+## 15. Siguiente bloque largo de implementación — Fase 3: Documentos, URLs e ingestión local segura
 
-Objetivo: migraciones SQL por boveda y casos de uso CRUD minimos para perfil, profesional/organizacion, citas, documentos (metadatos), informes, observaciones y auditoria/procedencia. Todavia no OCR, no URLs, no “¿me toca?”.
+**Destinatario:** Grok-M como único escritor (alternativa: Grok-L).
+**Coordinador:** Gemini-3.8-flash mediante Buzz.
+**Rama autorizada:** `main` (commits intermedios seguros con push directo tras validaciones).
+**Reglas críticas:** Sin deploy, sin secretos, datos 100% sintéticos, sin telemetría ni servicios externos de pago.
 
-Archivos permitidos: `src/domain/**`, `src/application/**`, `src/infrastructure/sqlite/**`, `src/interfaces/web/**`, `tests/unit/**`, `tests/integration/**`, `tests/fixtures/**`, `docs/md/PLAN_IMPLEMENTACION_GROK_M.md`.
+### Objetivos y entregables coherentes del bloque
+1. **Almacenamiento cifrado e inmutable de blobs locales (`src/infrastructure/storage`):**
+   - Streaming seguro de archivos con validación por magic numbers/contenido (PDF, PNG, JPEG, CSV, XLSX) y límites configurables.
+   - Hash SHA-256, cálculo de tamaño, detección de MIME y metadatos de procedencia.
+   - Cuarentena y promoción explícita solo tras validación.
+2. **Registro de URLs y trabajo de descarga idempotente (`src/domain/documents` y `src/application/documents`):**
+   - Outbox/jobs persistidos en SQLite para descargas diferidas/idempotentes.
+   - Defensas SSRF estrictas: protocolo HTTP(S) exclusivamente, validación de DNS, bloqueo radical de IP privadas/loopback/link-local/metadatos de nube, límites de saltos de redirección, timeouts y validación en cada redirección.
+   - Si una URL requiere credenciales o prohíbe copia, registrar solo la referencia indicando ausencia de respaldo durable.
+3. **Importación determinista de datos estructurados (CSV):**
+   - Importador sintético para previsualización y confirmación humana explícita campo a campo.
+4. **Pruebas integrales obligatorias:**
+   - Tests unitarios e integración para rechazo de SSRF (loopback, 169.254.x.x, redes RFC1918), rechazo de MIME falseado/archivos corruptos/ZIP bombs o path traversal, inmutabilidad de almacenamiento y reintentos idempotentes.
+   - Comandos obligatorios en verde: `npm run lint`, `npm run typecheck`, `npm test`, `npm run test:smoke`.
 
-Obligatorio:
-- SQLite de boveda en la ruta ya guardada en el catalogo (`createVault`); WAL, FK, migraciones transaccionales.
-- Observaciones con estados `extraido` | `requiere_confirmacion` | `confirmado` | `corregido`; un extraido no se muestra como confirmado.
-- Conservar nombre, unidad, rango y marca originales; fechas de toma vs informe separadas.
-- Fixtures solo sinteticos (vitamina D de la especificacion).
-- Casos de uso; handlers no hablan SQL.
-- Tests: aislamiento entre dos bovedas (IDOR), estado no confirmado, no conversion de unidades.
-
-Prohibido: inferir periodicidad; rangos genericos; FHIR/MCP/OAuth de clientes; ingestión de archivos; relajar tests; atribucion a IA.
-
-Verificar: `npm run lint`, `npm run typecheck`, `npm test`, `npm run test:smoke`.
-
-**Luego (no en F2-A):** F2-B motor de seguimiento explicable (`sin_evidencia`, indicacion revocada, vitamina D) — lo define quien coordine la semantica clinica, no un agente mecanico.
