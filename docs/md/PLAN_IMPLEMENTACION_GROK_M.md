@@ -3,9 +3,9 @@
 **Estado:** autorizado para implementación
 **Fecha:** 2026-09-02
 **Repositorio:** `ggerena/mi-salud`
-**Rama de trabajo preparada:** `feat/initial-mvp`
-**Coordinador solicitado:** Grok-M mediante Buzz
-**Regla principal:** implementar y verificar; no desplegar, no usar datos reales y no fusionar el PR
+**Rama vigente durante el MVP:** `main` (excepción autorizada por Gery el 2026-09-02)
+**Coordinación vigente:** Gemini-3.8-flash mediante Buzz; Grok-M como implementador preferente
+**Regla principal:** implementar y verificar; no desplegar, no usar datos reales y publicar sólo bloques revisados y con pruebas verdes
 
 ## 1. Objetivo del encargo
 
@@ -34,12 +34,12 @@ Ante una contradicción, prevalece la opción que minimice exposición de datos 
 
 ## 2. Resultado esperado de esta ejecución
 
-La ejecución se considera terminada únicamente cuando existe un PR borrador desde `feat/initial-mvp`, con el MVP implementado, documentado y probado. Grok-M no debe hacer merge ni marcarlo listo para revisión mientras haya pruebas pendientes, riesgos altos/medios válidos o controles `NO PROBADO` sin explicar.
+La ejecución se considera terminada únicamente cuando el MVP está implementado, documentado y probado en `main`, con el commit publicado y su CI verde. Ningún agente debe dar un bloque por cerrado mientras haya pruebas pendientes, riesgos altos/medios válidos o controles `NO PROBADO` sin explicar.
 
 Si el MVP completo no cabe responsablemente en una sola ejecución, cerrar una fase vertical utilizable y dejar:
 
 - pruebas verdes para lo construido;
-- el PR todavía en borrador;
+- el último bloque validado publicado en `main` y el trabajo parcial sin mezclar con ese cierre;
 - una lista exacta de requisitos terminados y pendientes;
 - ningún stub que aparente seguridad, cifrado, antivirus, OAuth, FHIR u OCR que en realidad no exista;
 - el siguiente paso preparado sin declarar el MVP completo.
@@ -202,7 +202,7 @@ Puede ajustarse el árbol si el ADR demuestra una forma más simple, pero no mez
 
 ## 6. Fases de implementación
 
-Cada fase debe cerrar con pruebas verdes, diff revisado y commit acotado. Respaldar temprano el PR borrador, pero no confundir respaldo con término.
+Cada fase debe cerrar con pruebas verdes, diff revisado, commit acotado, push a `main` y CI verde. La excepción de trabajo directo en `main` termina al cerrar el MVP y no autoriza despliegues ni reescritura de historia.
 
 ### Fase 0 — base reproducible y barreras
 
@@ -517,7 +517,7 @@ El MVP sólo puede declararse terminado si:
 - licencias y dependencias permiten autoalojamiento abierto;
 - no quedan vulnerabilidades críticas/altas aplicables ni hallazgos altos/medios válidos de revisión;
 - todas las pruebas de la sección 9 pasaron sobre el commit publicado;
-- el PR permanece en borrador y sin merge para revisión humana.
+- cada bloque quedó publicado en `main` sólo después de pruebas, revisión humana o adversarial cuando corresponda y CI verde.
 
 ## 12. Formato del informe de Grok-M
 
@@ -525,8 +525,8 @@ Al terminar cada bloque importante y al cerrar su ejecución, informar de forma 
 
 ```text
 Estado: completado | parcial | bloqueado
-Rama y commit:
-PR borrador:
+Commit publicado en main:
+CI:
 Fases terminadas:
 Qué puede probar una persona hoy:
 Pruebas ejecutadas y resultado:
@@ -535,7 +535,7 @@ Pendientes y NO PROBADO:
 Decisiones que requieren a la persona responsable:
 ```
 
-No responder sólo con un plan: el pedido autoriza implementación. No afirmar término basándose en código no ejecutado, mocks que omitan los límites de seguridad o un commit que no sea el publicado en el PR.
+No responder sólo con un plan: el pedido autoriza implementación. No afirmar término basándose en código no ejecutado, mocks que omitan los límites de seguridad o un commit que no esté publicado en `main` con CI verde.
 
 ## 13. Registro de ejecución (Grok-M)
 
@@ -543,7 +543,7 @@ No responder sólo con un plan: el pedido autoriza implementación. No afirmar t
 
 | Fecha (Santiago) | Paso | Resultado |
 | --- | --- | --- |
-| 2026-09-02 | Localizar encargo y repo | `C:\Users\gery_\Code\mi-salud`, rama `feat/initial-mvp`, PR borrador [#1](https://github.com/ggerena/mi-salud/pull/1) |
+| 2026-09-02 | Localizar encargo y repo | Inicio histórico en `feat/initial-mvp` y PR [#1](https://github.com/ggerena/mi-salud/pull/1); después se integró en `main` y se eliminaron las ramas auxiliares por instrucción de Gery. |
 | 2026-09-02 | ADR 0001 | `docs/md/ADR_0001_STACK_PROCESO_UNICO.md` — Node 24.20.0, Hono 4.13.5, `node:sqlite`, imagen `node:24.20.0-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e` |
 | 2026-09-02 | Coordinación | Gery pidió agentes más chicos. Andamiaje Fase 0 asignado a GLM-5.3-Flash (un solo escritor). Grok-M retiene OIDC, cifrado, aislamiento, clínica, revisión de seguridad. |
 | 2026-09-02 | Fase 0 — andamiaje (GLM-5.3-Flash) | Ver sección "Registro Fase 0 (GLM-5.3-Flash)" abajo. |
@@ -705,4 +705,3 @@ Segunda revision adversarial (diff `5ea09bf` vs `c6ca317`) encontro 1 hallazgo a
 4. **Pruebas integrales obligatorias:**
    - Tests unitarios e integración para rechazo de SSRF (loopback, 169.254.x.x, redes RFC1918), rechazo de MIME falseado/archivos corruptos/ZIP bombs o path traversal, inmutabilidad de almacenamiento y reintentos idempotentes.
    - Comandos obligatorios en verde: `npm run lint`, `npm run typecheck`, `npm test`, `npm run test:smoke`.
-
