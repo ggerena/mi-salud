@@ -95,6 +95,63 @@ describe('evaluateFollowUps', () => {
     expect(answer.items[0]?.explanation).toContain('2 de septiembre de 2026');
   });
 
+  it('un plan borrador mas reciente no oculta el plan activo del mismo examen', () => {
+    const observation = obs({ id: 'obs-d' });
+    const answer = evaluateFollowUps({
+      asOf,
+      timeZone: 'America/Santiago',
+      plans: [
+        {
+          id: 'plan-draft',
+          testCode: '14635-7',
+          testName: '25-OH vitamina D',
+          basis: 'clinician_instruction',
+          basisText: 'Borrador posterior',
+          intervalIso: 'P6M',
+          dueDateExact: null,
+          anchorAt: '2026-06-02',
+          upcomingDays: 14,
+          overdueDays: 0,
+          status: 'borrador',
+          documentId: 'doc-d',
+          observationId: observation.id,
+          providerId: 'prov-d',
+          sourceRef: 'pagina 2',
+          ruleId: null,
+          createdAt: '2026-08-01T00:00:00.000Z',
+          updatedAt: '2026-08-01T00:00:00.000Z',
+        },
+        {
+          id: 'plan-active',
+          testCode: '14635-7',
+          testName: '25-OH vitamina D',
+          basis: 'clinician_instruction',
+          basisText: 'Repetir examen en 3 meses',
+          intervalIso: 'P3M',
+          dueDateExact: null,
+          anchorAt: '2026-06-02',
+          upcomingDays: 14,
+          overdueDays: 0,
+          status: 'activo',
+          documentId: 'doc-d',
+          observationId: observation.id,
+          providerId: 'prov-d',
+          sourceRef: 'pagina 2',
+          ruleId: null,
+          createdAt: '2026-06-03T00:00:00.000Z',
+          updatedAt: '2026-06-03T00:00:00.000Z',
+        },
+      ],
+      rules: [],
+      observations: [observation],
+      documentIdByReportId: new Map([['rep-1', 'doc-d']]),
+    });
+    expect(answer.items).toHaveLength(1);
+    expect(answer.items[0]?.planId).toBe('plan-active');
+    expect(answer.items[0]?.status).toBe('due');
+    expect(answer.items[0]?.dueDate).toBe('2026-09-02');
+  });
+
   it('sin indicacion ni regla vigente responde sin_evidencia aunque el valor este bajo', () => {
     const answer = evaluateFollowUps({
       asOf,

@@ -383,7 +383,6 @@ export function evaluateFollowUps(input: {
     if (usedKeys.has(key)) {
       continue;
     }
-    usedKeys.add(key);
     const linked = plan.observationId !== null ? (obsById.get(plan.observationId) ?? null) : null;
     const group = obsByKey.get(key) ?? [];
     const latest = linked ?? pickLatestObservation(group);
@@ -414,6 +413,7 @@ export function evaluateFollowUps(input: {
       };
       item.explanation = explanationFor(item);
       items.push(item);
+      usedKeys.add(key);
       continue;
     }
 
@@ -424,6 +424,8 @@ export function evaluateFollowUps(input: {
     if (!ACTIVE_PLAN_STATUSES.has(plan.status)) {
       continue;
     }
+
+    usedKeys.add(key);
 
     let dueDate: string | null = null;
     try {
